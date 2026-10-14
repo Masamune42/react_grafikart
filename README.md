@@ -174,3 +174,120 @@ Exemples :
 Les deux méthodes peuvent être utilisées avec un `handleSubmit` : un champ contrôlé n'empêche pas de récupérer les données via `FormData`.
 
 **À retenir :** un formulaire n'a pas systématiquement besoin de `useState`. Le choix dépend principalement de la nécessité ou non de suivre et manipuler les valeurs pendant la saisie.
+
+## 3. Le flux de données — Communication entre composants
+
+En React, les données circulent principalement **du composant parent vers le composant enfant**, grâce aux `props`.
+
+Lorsqu'un composant enfant doit modifier une donnée appartenant au parent, celui-ci peut lui transmettre une fonction permettant de mettre à jour son state.
+
+C'est le principe du **flux de données unidirectionnel**.
+
+### 1. Déclarer le state dans le composant parent
+
+```jsx
+function App() {
+  const [isTermAccepted, setIsTermAccepted] = React.useState(false);
+
+  return <form>
+    <CGUCheckbox
+      checked={isTermAccepted}
+      onCheck={setIsTermAccepted}
+    />
+    <button disabled={!isTermAccepted}>
+      Envoyer le formulaire
+    </button>
+  </form>;
+}
+```
+
+**Fonctionnement :**
+
+- `isTermAccepted` : contient l'état actuel de la case à cocher (`true` ou `false`).
+- `setIsTermAccepted` : fonction permettant de modifier cet état.
+- `checked={isTermAccepted}` : transmet la valeur du state au composant enfant.
+- `onCheck={setIsTermAccepted}` : transmet la fonction de modification au composant enfant.
+- `disabled={!isTermAccepted}` : désactive le bouton tant que les CGU ne sont pas acceptées.
+
+Le composant `App` reste **responsable de la gestion du state**.
+
+### 2. Récupérer et utiliser les props dans le composant enfant
+
+```jsx
+function CGUCheckbox({ checked, onCheck }) {
+  return <div>
+    <label>
+      <input
+        type="checkbox"
+        onChange={(e) => onCheck(e.target.checked)}
+        checked={checked}
+      />
+      Accepter les conditions d'utilisation
+    </label>
+  </div>;
+}
+```
+
+**Fonctionnement :**
+
+- `{ checked, onCheck }` : récupère les propriétés transmises par le parent grâce à la déstructuration.
+- `checked={checked}` : utilise la valeur reçue pour contrôler la case à cocher.
+- `onChange` : détecte lorsque l'utilisateur coche ou décoche la case.
+- `e.target.checked` : récupère la nouvelle valeur booléenne de la case.
+- `onCheck(e.target.checked)` : appelle la fonction transmise par le parent avec cette nouvelle valeur.
+
+**Important :** le composant enfant ne modifie pas directement le state du parent. Il appelle une fonction fournie par ce dernier.
+
+### 3. Comprendre le flux de données
+
+Le fonctionnement suit les étapes suivantes :
+
+1. `App` initialise `isTermAccepted` à `false`.
+2. `App` transmet sa valeur à `CGUCheckbox` via la prop `checked`.
+3. L'utilisateur coche la case.
+4. `CGUCheckbox` appelle `onCheck(true)`.
+5. Cette fonction correspond à `setIsTermAccepted(true)` dans le parent.
+6. React effectue un nouveau rendu avec le state actualisé.
+7. La case est cochée et le bouton devient actif.
+
+**Schéma simplifié :**
+
+```text
+App (Parent)
+│
+├── State : isTermAccepted
+│
+├── checked={isTermAccepted} ─────┐
+│                                ▼
+│                          CGUCheckbox
+│                                │
+│                          onChange
+│                                │
+│                          onCheck(true)
+│                                │
+├── setIsTermAccepted(true) ◄─────┘
+│
+└── Mise à jour du bouton
+    disabled={!isTermAccepted}
+```
+
+### 4. Quand utiliser ce fonctionnement ?
+
+Cette approche est particulièrement utile lorsque **plusieurs composants doivent utiliser une même donnée**.
+
+Exemples :
+- Une checkbox qui active ou désactive un bouton.
+- Un champ de recherche qui filtre une liste affichée dans un autre composant.
+- Un formulaire composé de plusieurs sous-composants.
+- Un panier dont le total est actualisé lors de la modification des quantités.
+
+On appelle **lifting state up** (remontée du state) le fait de placer un état dans un composant parent commun afin que plusieurs composants puissent le partager.
+
+### 5. Bonnes pratiques
+
+- **Props** : utilisées pour transmettre des données et des fonctions du parent vers l'enfant.
+- **State** : placé dans le composant qui en a besoin, ou dans leur plus proche parent commun s'il doit être partagé.
+- **Callback** : fonction transmise à l'enfant pour lui permettre de demander une modification.
+- **Immutabilité des props** : un composant enfant ne doit pas modifier directement les props qu'il reçoit.
+
+**À retenir :** les données descendent du parent vers l'enfant via les `props`. Pour demander une modification, l'enfant peut appeler une fonction transmise par le parent. Le parent met à jour son state, ce qui entraîne un nouveau rendu des composants concernés.
