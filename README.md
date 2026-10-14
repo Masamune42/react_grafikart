@@ -59,3 +59,118 @@ setPerson(prev => ({
 Cette syntaxe permet d'utiliser la dernière valeur disponible du state, même lorsque React regroupe plusieurs mises à jour.
 
 **À retenir :** `useState` permet de gérer les données qui évoluent dans un composant. Toute modification doit passer par son setter.
+
+## 2. Les formulaires — Champs contrôlés et non contrôlés
+
+En React, il existe deux façons principales de gérer les valeurs des champs d'un formulaire :
+
+- **Champs contrôlés** : React gère les valeurs des champs via un `useState`.
+- **Champs non contrôlés** : le navigateur conserve les valeurs des champs, récupérées au moment de la soumission avec `FormData`.
+
+### Méthode 1 : Champ contrôlé avec useState
+
+```jsx
+const [firstName, setFirstName] = React.useState("John Doe");
+
+const handleChange = (e) => {
+  setFirstName(e.target.value);
+};
+
+const reset = () => {
+  setFirstName('');
+};
+
+return <form>
+  <input
+    type="text"
+    name="firstname"
+    value={firstName}
+    onChange={handleChange}
+  />
+  {firstName}
+  <button onClick={reset} type="button">Reset</button>
+</form>;
+```
+
+**Fonctionnement :**
+
+- `useState` : stocke la valeur actuelle du champ.
+- `value={firstName}` : lie la valeur du champ au state React.
+- `onChange={handleChange}` : met à jour le state à chaque modification.
+- `e.target.value` : récupère la nouvelle valeur saisie.
+- `setFirstName('')` : vide le champ en modifiant son state.
+
+**Quand utiliser un champ contrôlé ?**
+
+Lorsque React doit connaître ou modifier la valeur du champ **pendant que l'utilisateur interagit avec le formulaire**.
+
+Exemples :
+- Effectuer une validation en temps réel (email, mot de passe, etc.).
+- Afficher dynamiquement un message selon la saisie.
+- Activer ou désactiver un bouton selon les valeurs.
+- Mettre à jour d'autres composants selon la saisie.
+- Modifier ou réinitialiser les valeurs depuis React.
+
+### Méthode 2 : Champ non contrôlé avec FormData
+
+```jsx
+const handleSubmit = (ev) => {
+  ev.preventDefault();
+  console.log(new FormData(ev.currentTarget));
+};
+
+return <form onSubmit={handleSubmit}>
+  <input
+    type="text"
+    name="firstName"
+    defaultValue="John Doe"
+  />
+  <button type="submit">Submit</button>
+</form>;
+```
+
+**Fonctionnement :**
+
+- `defaultValue` : définit la valeur initiale du champ sans le contrôler avec React.
+- `onSubmit={handleSubmit}` : déclenche la fonction lors de la soumission.
+- `ev.preventDefault()` : empêche le rechargement de la page lié à la soumission native.
+- `new FormData(ev.currentTarget)` : récupère les données des champs du formulaire possédant un attribut `name`.
+- `ev.currentTarget` : désigne ici le formulaire auquel l'événement est attaché.
+
+Pour afficher les valeurs dans la console :
+
+```jsx
+const data = new FormData(ev.currentTarget);
+console.log(Object.fromEntries(data.entries()));
+```
+
+**Quand utiliser un champ non contrôlé ?**
+
+Lorsque les valeurs des champs sont uniquement nécessaires **au moment de la soumission du formulaire**.
+
+Exemples :
+- Formulaire de contact simple.
+- Barre de recherche dont la valeur est utilisée uniquement après validation.
+- Formulaire contenant plusieurs champs indépendants.
+- Formulaire sans validation dynamique ni interaction particulière.
+
+### Comparaison des deux méthodes
+
+| Critère | Contrôlé | Non contrôlé |
+|---|---|---|
+| Gestion des valeurs | React (`useState`) | Navigateur |
+| Lecture des valeurs | À chaque modification | À la soumission |
+| Validation en temps réel | Facile | Nécessite une gestion supplémentaire |
+| Modification depuis React | Facile | Moins directe |
+| Quantité de code | Plus importante | Plus réduite |
+| Soumission avec FormData | Possible | Oui |
+
+### Bonne pratique : choisir selon le besoin
+
+**Privilégier un champ non contrôlé** pour les formulaires simples dont les valeurs ne sont utilisées qu'à la soumission. Cela évite de multiplier inutilement les `useState`.
+
+**Privilégier un champ contrôlé** lorsqu'il faut réagir dynamiquement aux modifications des champs.
+
+Les deux méthodes peuvent être utilisées avec un `handleSubmit` : un champ contrôlé n'empêche pas de récupérer les données via `FormData`.
+
+**À retenir :** un formulaire n'a pas systématiquement besoin de `useState`. Le choix dépend principalement de la nécessité ou non de suivre et manipuler les valeurs pendant la saisie.
