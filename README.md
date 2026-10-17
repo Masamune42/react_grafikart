@@ -291,3 +291,189 @@ On appelle **lifting state up** (remontée du state) le fait de placer un état 
 - **Immutabilité des props** : un composant enfant ne doit pas modifier directement les props qu'il reçoit.
 
 **À retenir :** les données descendent du parent vers l'enfant via les `props`. Pour demander une modification, l'enfant peut appeler une fonction transmise par le parent. Le parent met à jour son state, ce qui entraîne un nouveau rendu des composants concernés.
+
+## 4. Liste de produits — Recherche, filtrage et composition de composants
+
+Cet exercice combine les notions précédentes pour afficher **un tableau de produits classés par catégorie**, avec une recherche par nom et une option pour n'afficher que les produits en stock.
+
+### 1. Décrire les produits et découper l'interface
+
+Chaque produit est représenté par un objet :
+
+```jsx
+{ category: "Fruits", price: "$1", stocked: true, name: "Apple" }
+```
+
+- `category` : catégorie du produit.
+- `price` : prix affiché.
+- `stocked` : indique si le produit est en stock.
+- `name` : nom utilisé pour l'affichage et la recherche.
+
+L'interface est répartie entre plusieurs composants :
+
+```text
+App
+├── SearchBar
+│   ├── Input
+│   └── Checkbox
+└── ProductTable
+    ├── ProductCategoryRow
+    └── ProductRow
+```
+
+- `App` : conserve les filtres et calcule les produits visibles.
+- `SearchBar` : rassemble les contrôles de recherche et de stock.
+- `Input` et `Checkbox` : composants de formulaire réutilisables.
+- `ProductTable` : construit les lignes du tableau.
+- `ProductCategoryRow` et `ProductRow` : affichent une catégorie et un produit.
+
+### 2. Placer les états dans le parent commun
+
+```jsx
+const [showStockedOnly, setShowStockedOnly] = useState(false);
+const [search, setSearch] = useState('');
+
+return <div className="container my-3">
+  <SearchBar
+    search={search}
+    onSearchChange={setSearch}
+    showStockedOnly={showStockedOnly}
+    onStockedOnlyChange={setShowStockedOnly}
+  />
+  <ProductTable products={visibleProducts} />
+</div>;
+```
+
+**Fonctionnement :**
+
+- `search` : contient le texte recherché, initialement vide.
+- `showStockedOnly` : indique si le filtre de stock est actif, initialement à `false`.
+- Les valeurs et leurs setters sont transmis à `SearchBar` via les `props`.
+- `ProductTable` reçoit uniquement la liste des produits à afficher.
+
+Le state est placé dans `App`, car les contrôles de recherche et le tableau dépendent des mêmes filtres. C'est une application du **lifting state up**.
+
+### 3. Utiliser des champs contrôlés réutilisables
+
+Dans `SearchBar`, le champ de recherche reçoit la valeur et la fonction de modification du parent :
+
+```jsx
+<Input
+  value={search}
+  onChange={onSearchChange}
+  placeholder="Rechercher..."
+/>
+```
+
+Le composant `Input` transmet directement le texte saisi à sa fonction `onChange` :
+
+```jsx
+<input
+  type="text"
+  className="form-control"
+  value={value}
+  onChange={(e) => onChange(e.target.value)}
+  placeholder={placeholder}
+/>
+```
+
+Le composant `Checkbox` suit le même principe avec une valeur booléenne :
+
+```jsx
+<input
+  id={id}
+  type="checkbox"
+  className="form-check-input"
+  checked={checked}
+  onChange={(e) => onChange(e.target.checked)}
+/>
+<label className="form-check-label" htmlFor={id}>{label}</label>
+```
+
+- `e.target.value` : récupère le texte du champ.
+- `e.target.checked` : récupère l'état de la case à cocher.
+- `htmlFor={id}` : associe le label à la case correspondante.
+- Ces composants transmettent une valeur simple au parent, sans lui imposer de manipuler l'événement du navigateur.
+
+### 4. Calculer les produits visibles avec filter
+
+```jsx
+const visibleProducts = PRODUCTS.filter(product => {
+  if (showStockedOnly && !product.stocked) {
+    return false;
+  }
+
+  if (search && !product.name.toLowerCase().includes(search.toLowerCase())) {
+    return false;
+  }
+
+  return true;
+});
+```
+
+**Fonctionnement :**
+
+- `filter()` : crée un nouveau tableau contenant les produits conservés, sans modifier `PRODUCTS`.
+- Le premier test exclut les produits indisponibles lorsque le filtre de stock est coché.
+- Le second exclut les produits dont le nom ne contient pas la recherche.
+- `toLowerCase()` : rend la comparaison insensible à la casse.
+- `includes()` : recherche une partie du nom, sans exiger une correspondance exacte.
+- `return true` : conserve le produit lorsqu'il satisfait les deux filtres.
+
+**Exemple :** une recherche sur `p` conserve les produits dont le nom contient cette lettre. Si le filtre de stock est aussi actif, seuls ceux qui sont disponibles restent affichés.
+
+**Bonne pratique :** `visibleProducts` est une **donnée dérivée**, recalculée à chaque rendu à partir de `PRODUCTS` et des filtres. Il n'est pas nécessaire de la stocker dans un autre `useState`.
+
+### 5. Construire les lignes et afficher les catégories
+
+```jsx
+const rows = [];
+let lastCategory = null;
+
+for (let product of products) {
+  if (product.category !== lastCategory) {
+    rows.push(
+      <ProductCategoryRow key={product.category} name={product.category} />
+    );
+  }
+  lastCategory = product.category;
+  rows.push(<ProductRow product={product} key={product.name} />);
+}
+```
+
+**Fonctionnement :**
+
+- `rows` : rassemble les éléments JSX à afficher dans le `<tbody>` du tableau.
+- `lastCategory` : mémorise la catégorie du produit précédent.
+- Lorsqu'une nouvelle catégorie est rencontrée, une ligne de titre est ajoutée avant le produit.
+- `key` : permet à React d'identifier les éléments d'une liste entre les rendus. Les catégories et les noms sont uniques dans les données de cet exercice.
+
+**Important :** ce fonctionnement suppose que les produits d'une même catégorie se suivent dans le tableau de données. La boucle ne trie pas les produits ; `filter()` conserve leur ordre initial.
+
+La ligne de catégorie utilise une cellule qui occupe les deux colonnes :
+
+```jsx
+<tr>
+  <td colSpan={2}><strong>{name}</strong></td>
+</tr>
+```
+
+### 6. Adapter l'affichage selon le stock
+
+Dans `ProductRow`, le nom des produits indisponibles apparaît en rouge :
+
+```jsx
+const style = product.stocked ? undefined : { color: 'red' };
+
+return <tr>
+  <td style={style}>{product.name}</td>
+  <td>{product.price}</td>
+</tr>;
+```
+
+- L'opérateur ternaire choisit le style selon la valeur de `product.stocked`.
+- `undefined` : aucun style en ligne n'est ajouté pour un produit disponible.
+- `{ color: 'red' }` : définit le style du nom d'un produit indisponible.
+- En JSX, la prop `style` reçoit un objet JavaScript.
+
+**À retenir :** `App` centralise les filtres, les champs contrôlés demandent leur modification via des callbacks, et la liste visible est recalculée à chaque rendu. La composition de composants permet ensuite d'afficher les produits, leurs catégories et leur disponibilité avec des responsabilités bien définies.
