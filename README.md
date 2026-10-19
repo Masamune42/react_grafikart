@@ -477,3 +477,285 @@ return <tr>
 - En JSX, la prop `style` reçoit un objet JavaScript.
 
 **À retenir :** `App` centralise les filtres, les champs contrôlés demandent leur modification via des callbacks, et la liste visible est recalculée à chaque rendu. La composition de composants permet ensuite d'afficher les produits, leurs catégories et leur disponibilité avec des responsabilités bien définies.
+
+## 5. useEffect — Synchroniser un composant avec l'extérieur
+
+Le hook `useEffect` permet de **synchroniser un composant avec un système extérieur à React** : le titre de la page, un événement du navigateur ou un timer, par exemple.
+
+Il s'importe depuis React :
+
+```jsx
+import { useEffect } from 'react';
+```
+
+### 1. Comprendre la structure d'un effet
+
+```jsx
+useEffect(() => {
+  // Installer ou mettre à jour la synchronisation.
+
+  return () => {
+    // Nettoyer la synchronisation précédente si nécessaire.
+  };
+}, [dependance]);
+```
+
+- La fonction de l'effet s'exécute après que React a appliqué le rendu.
+- Le tableau de dépendances indique quelles valeurs doivent provoquer une nouvelle synchronisation.
+- La fonction retournée est le **nettoyage** (ou *cleanup*). Elle est facultative si l'effet n'a rien à annuler ou à restaurer.
+- Avant de relancer un effet dont les dépendances ont changé, React exécute son ancien nettoyage.
+- Le nettoyage s'exécute aussi lorsque le composant est retiré de l'interface.
+
+| Écriture | Quand l'effet s'exécute-t-il ? |
+|---|---|
+| `useEffect(fn)` | Après chaque rendu appliqué du composant |
+| `useEffect(fn, [])` | Au montage, sans relance liée aux changements de state ou de props |
+| `useEffect(fn, [title])` | Au montage, puis lorsque `title` change |
+
+**Important :** en développement avec `StrictMode`, React peut effectuer un cycle supplémentaire installation → nettoyage → installation pour vérifier les effets. Un effet correctement nettoyé doit supporter ce fonctionnement.
+
+### 2. Afficher ou masquer un composant
+
+La première partie de l'exercice est actuellement commentée dans `App`. Elle permet de monter et démonter `EditTitle` avec une checkbox :
+
+```jsx
+const [showInput, setShowInput] = React.useState(false);
+
+return <div>
+  <Checkbox
+    label="Afficher"
+    checked={showInput}
+    onChange={setShowInput}
+  />
+  {showInput && <EditTitle />}
+</div>;
+```
+
+**Fonctionnement :**
+
+1. `showInput` vaut `false` : `EditTitle` n'est pas affiché.
+2. L'utilisateur coche la case : `setShowInput(true)` est appelé.
+3. React ajoute `EditTitle` à l'interface : c'est son **montage**, et ses effets sont installés.
+4. L'utilisateur décoche la case : React retire `EditTitle`, c'est son **démontage**.
+5. React appelle les fonctions de nettoyage de ses effets.
+
+**À retenir :** l'affichage conditionnel utilise le state et le JSX, sans avoir besoin d'un effet. Quand `EditTitle` est remonté, ses états locaux sont réinitialisés.
+
+### 3. Modifier le titre de la page
+
+Dans `EditTitle`, le champ est lié au state `title` :
+
+```jsx
+const [title, setTitle] = React.useState('');
+
+useEffect(() => {
+  document.title = title;
+}, [title]);
+
+// Dans le JSX :
+<Input
+  placeholder="Modifier le titre"
+  value={title}
+  onChange={setTitle}
+/>
+```
+
+**Fonctionnement :**
+
+1. L'utilisateur écrit dans le champ.
+2. `Input` transmet le texte à `setTitle`.
+3. React effectue un nouveau rendu avec le nouveau `title`.
+4. L'effet dépendant de `[title]` met à jour le titre de l'onglet du navigateur.
+
+Le champ « Prénom » possède un state indépendant, `firstname`. Le modifier provoque un rendu, mais ne relance pas cet effet puisque `title` n'a pas changé.
+
+**Important :** l'effet s'exécute aussi au montage. Comme `title` est initialement vide, le titre de la page devient d'abord vide.
+
+### 4. Restaurer le titre au démontage
+
+Un autre effet conserve le titre présent avant l'édition :
+
+```jsx
+useEffect(() => {
+  const originalTitle = document.title;
+
+  return () => {
+    document.title = originalTitle;
+  };
+}, []);
+```
+
+- Au montage, `originalTitle` mémorise le titre d'origine.
+- Le tableau `[]` évite de reprendre un nouveau titre à chaque saisie.
+- Au démontage, le nettoyage restaure la valeur mémorisée.
+
+Dans le code, cet effet est déclaré avant celui qui modifie le titre : il peut ainsi conserver le titre initial avant son remplacement.
+
+### 5. Écouter le défilement et retirer l'écouteur
+
+```jsx
+const [y, setY] = React.useState(0);
+
+useEffect(() => {
+  const handler = () => {
+    setY(window.scrollY);
+  };
+
+  window.addEventListener('scroll', handler);
+
+  return () => {
+    window.removeEventListener('scroll', handler);
+  };
+}, []);
+```
+
+**Fonctionnement :**
+
+- `addEventListener` installe une fonction appelée lorsque la page défile.
+- `window.scrollY` donne la position verticale du défilement.
+- `setY` mémorise cette position pour l'afficher avec `{y}` dans le JSX.
+- `removeEventListener` retire l'écouteur lorsque le composant disparaît.
+- Il faut fournir **la même fonction `handler`** à l'ajout et au retrait.
+
+Le bloc commenté de hauteur `300vh` permet d'obtenir une page assez longue pour tester le défilement.
+
+### 6. Créer un décompteur : séparer la durée et le temps restant
+
+La deuxième partie de l'exercice utilise deux états :
+
+```jsx
+const [duration, setDuration] = React.useState(5);
+const [secondsLeft, setSecondsLeft] = React.useState(duration);
+
+const handleChange = (value) => {
+  setDuration(value);
+  setSecondsLeft(value);
+};
+```
+
+- `duration` : valeur saisie dans le champ, qui reste affichée pendant le décompte.
+- `secondsLeft` : temps restant, qui diminue chaque seconde.
+- `handleChange` : change la durée et réinitialise le décompte à la nouvelle valeur.
+- `useState(duration)` définit seulement la valeur initiale de `secondsLeft`. Les modifications futures de `duration` ne sont pas automatiquement recopiées dans cet état.
+
+```jsx
+<Input
+  placeholder="Timer..."
+  value={duration}
+  onChange={handleChange}
+/>
+<p>Décompte : {secondsLeft}</p>
+```
+
+### 7. Installer le timer et comprendre ses dépendances
+
+Le principe du timer est de programmer une action toutes les secondes :
+
+```jsx
+const timer = setInterval(() => {
+  setSecondsLeft(value => Math.max(0, value - 1));
+}, 1000);
+```
+
+- `1000` millisecondes correspondent à une seconde.
+- `setInterval` retourne l'identifiant nécessaire pour l'arrêter avec `clearInterval(timer)`.
+- La mise à jour fonctionnelle `value => ...` reçoit la dernière valeur disponible de l'état.
+- `Math.max(0, value - 1)` empêche un résultat négatif, mais ne suffit pas à arrêter l'intervalle.
+
+Dans l'exercice, l'effet dépend de `[duration]` : il installe un intervalle au montage et le remplace lorsque la durée change. Le nettoyage est :
+
+```jsx
+return () => clearInterval(timer);
+```
+
+Une diminution de `secondsLeft` ne relance pas cet effet puisque `secondsLeft` ne figure pas dans ses dépendances. La mise à jour fonctionnelle permet de le modifier sans lire sa valeur depuis le rendu qui a installé l'intervalle.
+
+**Exemple :** le décompte commence à `5`, puis affiche `4`, `3`… Si l'utilisateur saisit `10`, le handler réinitialise le temps restant à `10`, et l'effet annule l'ancien intervalle avant d'en installer un nouveau.
+
+**Point à améliorer dans le code actuel :** `clearInterval(timer)` est appelé à l'intérieur de la fonction passée à `setSecondsLeft`. Cette fonction de mise à jour doit rester **pure** : calculer et retourner le nouvel état, sans arrêter un timer ni modifier autre chose. React peut l'appeler plusieurs fois en développement pour vérifier sa pureté.
+
+Voici une variante pédagogique qui arrête l'intervalle en dehors du setter et valide la durée :
+
+```jsx
+useEffect(() => {
+  let remaining = Number(duration);
+
+  if (!Number.isInteger(remaining) || remaining <= 0) {
+    return;
+  }
+
+  const timer = setInterval(() => {
+    remaining -= 1;
+    setSecondsLeft(remaining);
+
+    if (remaining === 0) {
+      clearInterval(timer);
+    }
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, [duration]);
+```
+
+Pour cette variante, le handler peut convertir la saisie, qui arrive sous forme de texte, avant de modifier les états :
+
+```jsx
+const handleChange = (value) => {
+  const seconds = Number(value);
+
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    return;
+  }
+
+  setDuration(seconds);
+  setSecondsLeft(seconds);
+};
+```
+
+La variable `remaining` est locale à chaque installation de l'effet. Le state `secondsLeft` sert à afficher sa progression. Un vrai timer de navigateur peut subir des retards, notamment lorsque l'onglet est en arrière-plan : cet exercice illustre le fonctionnement des effets, sans garantir une mesure exacte du temps écoulé.
+
+### 8. Ce qu'il faut éviter avec useEffect
+
+**Recopier un state dans un autre à l'aide d'un effet.**
+
+```jsx
+// À éviter ici : cette mise à jour découle de la saisie utilisateur.
+useEffect(() => {
+  setSecondsLeft(duration);
+}, [duration]);
+```
+
+Dans cet exercice, le handler connaît déjà les deux mises à jour à effectuer : il peut appeler `setDuration` et `setSecondsLeft` directement. Ajouter un effet pour cette copie impose un rendu supplémentaire inutile.
+
+**Nuance importante : un setter n'est pas interdit dans un effet.** Mettre à jour un état depuis le callback d'un timer ou d'un événement `scroll` est utile pour synchroniser React avec ces événements extérieurs. Ce qu'on évite, c'est un effet servant uniquement à recalculer ou recopier des données déjà disponibles dans React.
+
+**Créer une boucle de mises à jour.**
+
+```jsx
+// À éviter : l'effet modifie immédiatement sa propre dépendance.
+useEffect(() => {
+  setSecondsLeft(secondsLeft - 1);
+}, [secondsLeft]);
+```
+
+Chaque modification relance l'effet, qui modifie encore l'état : le décompte tourne en boucle sans attendre une seconde. Il faut une condition d'arrêt et une vraie programmation dans le temps.
+
+**Oublier le nettoyage ou l'exécuter immédiatement.**
+
+```jsx
+// Incorrect : arrête le timer pendant l'installation de l'effet.
+return clearInterval(timer);
+
+// Correct : fournit une fonction que React appellera au nettoyage.
+return () => clearInterval(timer);
+```
+
+Sans nettoyage, les timers ou écouteurs peuvent s'accumuler lors des réinstallations et continuer à fonctionner après le démontage.
+
+**Masquer des dépendances pour empêcher un effet de se relancer.** Toutes les valeurs réactives lues par l'effet doivent être prises en compte dans ses dépendances. Les setters fournis par `useState` ont une identité stable et peuvent être omis. Utiliser une mise à jour fonctionnelle permet de lire l'état précédent sans capturer une ancienne valeur.
+
+**Modifier directement le DOM pour afficher un state.** Préférer `<p>{secondsLeft}</p>` à `document.getElementById(...).textContent = ...`. React actualise déjà l'affichage. En revanche, `document.title` est une synchronisation extérieure adaptée à un effet.
+
+**Utiliser un effet pour un simple calcul.** Un filtrage comme `PRODUCTS.filter(...)` se calcule pendant le rendu. Il ne nécessite ni effet ni état supplémentaire.
+
+**À retenir :** utiliser un effet pour installer ou mettre à jour une synchronisation extérieure, déclarer ses dépendances et nettoyer ce qui a été installé. Garder les actions liées à la saisie dans les handlers, les calculs dans le rendu, et les fonctions de mise à jour du state pures.
