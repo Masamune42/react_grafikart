@@ -759,3 +759,538 @@ Sans nettoyage, les timers ou écouteurs peuvent s'accumuler lors des réinstall
 **Utiliser un effet pour un simple calcul.** Un filtrage comme `PRODUCTS.filter(...)` se calcule pendant le rendu. Il ne nécessite ni effet ni état supplémentaire.
 
 **À retenir :** utiliser un effet pour installer ou mettre à jour une synchronisation extérieure, déclarer ses dépendances et nettoyer ce qui a été installé. Garder les actions liées à la saisie dans les handlers, les calculs dans le rendu, et les fonctions de mise à jour du state pures.
+
+## 7. useRef — Conserver une valeur sans déclencher de rendu
+
+Le hook `useRef` permet de **conserver une valeur entre les rendus sans déclencher de nouveau rendu lorsqu'on la modifie**.
+
+Dans cet exercice, un intervalle affiche chaque seconde dans la console le texte actuellement saisi dans un champ, sans devoir recréer l'intervalle à chaque lettre.
+
+### 1. Créer une référence et accéder à sa valeur
+
+```jsx
+const prefixRef = useRef(null);
+```
+
+`useRef` retourne un objet dont la propriété `current` contient la valeur mémorisée :
+
+```jsx
+// Au départ :
+prefixRef.current; // null
+
+// Pour changer la valeur :
+prefixRef.current = 'Bonjour';
+```
+
+- `null` : valeur initiale de la référence.
+- `prefixRef` : le même objet est conservé entre les rendus du composant.
+- `prefixRef.current` : valeur que l'on peut lire et modifier.
+- Une modification de `current` ne demande pas à React de refaire le rendu.
+
+**Important :** une référence est conservée pendant la vie du composant. Elle est recréée si celui-ci est démonté puis remonté.
+
+### 2. Comprendre la différence avec useState
+
+Dans l'exercice, le champ reste contrôlé par un state :
+
+```jsx
+const [prefix, setPrefix] = useState('');
+
+// Dans le JSX :
+<Input value={prefix} onChange={setPrefix} />
+```
+
+| `useState` | `useRef` |
+|---|---|
+| Conserve une valeur entre les rendus | Conserve une valeur entre les rendus |
+| Se modifie avec un setter | Se modifie avec `.current` |
+| Une nouvelle valeur demande un rendu | Modifier `.current` ne déclenche pas de rendu |
+| Adapté aux données affichées dans l'interface | Adapté aux valeurs utilisées par des callbacks ou aux références DOM |
+
+**Pourquoi utiliser les deux ici ?** Le state `prefix` contrôle le texte affiché dans le champ. La référence permet au callback de l'intervalle de lire le texte récent sans réinstaller cet intervalle.
+
+### 3. Comprendre le problème d'une ancienne valeur capturée
+
+Sans référence, on pourrait écrire :
+
+```jsx
+useEffect(() => {
+  const timer = setInterval(() => {
+    console.log(prefix);
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, []);
+```
+
+Mais ce code lit `prefix` depuis le rendu qui a installé l'effet. Comme `[]` ne provoque pas de réinstallation à chaque changement de texte, le callback conserve ici la valeur initiale, une chaîne vide.
+
+**Ce n'est pas le state qui ne se met pas à jour :** les rendus suivants ont bien un nouveau `prefix`, mais l'ancien callback utilise encore celui du premier rendu. C'est une **fermeture obsolète** (*stale closure*).
+
+Ajouter `[prefix]` corrigerait la lecture, mais annulerait et recréerait l'intervalle à chaque saisie. Dans cet exercice, la référence permet de garder l'intervalle installé tout en lisant une valeur actualisée.
+
+### 4. Lire la référence depuis l'intervalle
+
+Dans le code de l'exercice, on retrouve :
+
+```jsx
+const prefixRef = useRef(null);
+const [prefix, setPrefix] = useState('');
+prefixRef.current = prefix;
+
+useEffect(() => {
+  const timer = setInterval(() => {
+    console.log(prefixRef.current);
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, []);
+```
+
+Le callback conserve une référence vers **le même objet `prefixRef`**, puis consulte sa propriété `current` à chaque déclenchement. Il ne conserve donc pas simplement une copie du texte initial.
+
+**Point à améliorer :** l'affectation `prefixRef.current = prefix` est actuellement faite pendant le rendu. Il vaut mieux éviter de lire ou modifier une référence pendant le rendu, sauf pour une initialisation prévisible. Pour cet exemple, on peut synchroniser la référence dans un effet déclaré avant celui de l'intervalle :
+
+```jsx
+const [prefix, setPrefix] = useState('');
+const prefixRef = useRef(prefix);
+
+useEffect(() => {
+  prefixRef.current = prefix;
+}, [prefix]);
+
+useEffect(() => {
+  const timer = setInterval(() => {
+    console.log(prefixRef.current);
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, []);
+```
+
+- Le premier effet actualise la référence après un changement de `prefix`.
+- Le second installe l'intervalle, sans le recréer à chaque saisie.
+- Le nettoyage arrête l'intervalle au démontage et évite son accumulation, notamment avec les vérifications de `StrictMode` en développement.
+
+### 5. Suivre le fonctionnement étape par étape
+
+1. Le composant est monté avec `prefix` égal à `''`.
+2. La référence contient également `''`, et l'intervalle est installé.
+3. L'utilisateur écrit `Bonjour` : `Input` appelle `setPrefix` à chaque saisie.
+4. React refait le rendu avec le nouveau texte dans le champ.
+5. La référence est actualisée avec le texte récent.
+6. Au prochain déclenchement, l'intervalle lit `prefixRef.current` et affiche `Bonjour` dans la console.
+7. Le composant disparaît : le nettoyage appelle `clearInterval(timer)`.
+
+**À noter :** l'intervalle écrit dans la console du navigateur, pas dans la page. Le paragraphe « Lorem ipsum » ne dépend pas de la référence.
+
+### 6. Autre utilisation fréquente : accéder à un élément HTML
+
+Une référence peut aussi contenir un élément DOM, par exemple pour placer le curseur dans un champ après un clic :
+
+```jsx
+function FocusExample() {
+  const inputRef = useRef(null);
+
+  const handleFocus = () => {
+    inputRef.current?.focus();
+  };
+
+  return <div>
+    <input ref={inputRef} />
+    <button onClick={handleFocus}>Placer le curseur</button>
+  </div>;
+}
+```
+
+- `ref={inputRef}` : React place l'élément `<input>` dans `inputRef.current` lorsqu'il est ajouté au DOM.
+- `.focus()` : donne le focus au champ.
+- `?.` : évite l'appel si la référence vaut `null`.
+- React remet la référence à `null` lorsque l'élément est retiré.
+
+Cet exemple utilise directement un `<input>` natif. Le composant personnalisé `Input` de l'exercice ne transmet pas actuellement de prop `ref` à son champ interne.
+
+### 7. Bonnes pratiques et erreurs à éviter
+
+- **Ne pas remplacer un state d'affichage par une ref.** Écrire `counterRef.current += 1` ne rafraîchit pas un compteur affiché dans le JSX.
+- **Ne pas lire une ref comme source d'affichage dans le rendu.** Si une valeur doit déterminer l'interface, utiliser un state.
+- **Lire et modifier les références dans les handlers ou les effets**, plutôt que pendant le rendu.
+- **Ne pas utiliser une ref pour masquer des dépendances manquantes.** Dans cet exercice, l'effet de synchronisation dépend bien de `[prefix]`. La référence sert précisément à fournir la valeur récente à un callback durable.
+- **Toujours nettoyer les ressources installées.** Une ref ne remplace pas le `clearInterval` nécessaire pour un timer.
+- **Distinguer `useRef` et `useMemo`.** Une ref conserve un objet mutable ; `useMemo` met en cache le résultat d'un calcul selon ses dépendances.
+
+**À retenir :** `useState` sert aux valeurs qui font évoluer l'interface. `useRef` conserve une valeur ou un élément DOM sans provoquer de rendu. Dans cet exercice, la référence donne accès au texte récent depuis un intervalle qui reste installé pendant la saisie.
+
+## 8. Les hooks personnalisés — Réutiliser une logique React
+
+Un hook personnalisé est **une fonction dont le nom commence par `use` et qui peut utiliser d'autres hooks** pour regrouper une logique réutilisable.
+
+Au lieu d'écrire la gestion d'un compteur, d'un titre ou d'une requête directement dans chaque composant, on la place dans un fichier du dossier `src/hooks`.
+
+**Important :** un hook personnalisé partage une logique, pas automatiquement un état. Deux composants qui appellent `useToggle()` possèdent chacun leur propre état.
+
+### 1. useToggle — Basculer entre true et false
+
+```jsx
+export function useToggle(initial = false) {
+  const [state, setState] = useState(initial);
+  const toggle = () => setState(v => !v);
+
+  return [state, toggle];
+}
+```
+
+**Fonctionnement :**
+
+- `initial = false` : valeur de départ si aucun argument n'est fourni.
+- `useState(initial)` : mémorise le booléen.
+- `v => !v` : reçoit la valeur précédente et l'inverse.
+- `return [state, toggle]` : fournit la valeur et une fonction pour la modifier.
+
+Dans `App`, l'exemple de checkbox est actuellement commenté :
+
+```jsx
+const [checked, toggleCheck] = useToggle();
+
+// Dans le JSX :
+<input type="checkbox" checked={checked} onChange={toggleCheck} />
+{checked && 'Je suis coché'}
+```
+
+1. `checked` commence à `false`.
+2. Un clic appelle `toggleCheck`.
+3. L'état passe à `true` et React refait le rendu.
+4. La case est cochée et le texte apparaît.
+5. Un autre clic inverse à nouveau l'état.
+
+Les noms `checked` et `toggleCheck` sont choisis lors de la déstructuration du tableau. Ils correspondent aux positions de `state` et `toggle` dans le résultat du hook.
+
+### 2. useIncrement — Encapsuler un compteur avec des limites
+
+```jsx
+export function useIncrement({base = 0, max = Infinity, min = -Infinity}) {
+  const [state, setState] = useState(base);
+
+  return {
+    count: state,
+    increment: () => setState(v => v < max ? v + 1 : v),
+    decrement: () => setState(v => v > min ? v - 1 : v)
+  };
+}
+```
+
+Utilisation dans `App` :
+
+```jsx
+const {count, increment, decrement} = useIncrement({
+  base: 0,
+  max: 10,
+  min: 0
+});
+
+// Dans le JSX :
+<p>Compteur {count}</p>
+<button onClick={increment} type="button">Incrémenter</button>
+<button onClick={decrement} type="button">Décrémenter</button>
+```
+
+- `base` : valeur initiale du compteur.
+- `max` et `min` : bornes vérifiées avant chaque variation de `1`.
+- `v < max ? v + 1 : v` : augmente si possible, sinon conserve la valeur.
+- `v > min ? v - 1 : v` : diminue si possible, sinon conserve la valeur.
+- Les mises à jour fonctionnelles utilisent la dernière valeur disponible du state.
+
+Ici, le compteur démarre à `0` et évolue entre `0` et `10`. Le hook suppose une configuration cohérente : il ne corrige pas une valeur initiale située hors des bornes et ne valide pas des bornes décimales.
+
+**Pourquoi retourner un objet ?** Les trois résultats ont des noms explicites. Contrairement à un tableau, l'ordre de déstructuration n'a pas d'importance : `{increment, count, decrement}` fonctionnerait aussi.
+
+### 3. useDocumentTitle — Modifier le titre et restaurer sa valeur initiale
+
+```jsx
+export function useDocumentTitle(title) {
+  const titleRef = useRef(document.title);
+
+  useEffect(() => {
+    return () => {
+      document.title = titleRef.current;
+    };
+  }, []);
+
+  useEffect(() => {
+    document.title = title ? title : titleRef.current;
+  }, [title]);
+}
+```
+
+Dans `App` :
+
+```jsx
+const [name, setName] = useState('');
+
+useDocumentTitle(name ? `Editer ${name}` : null);
+
+// Dans le JSX :
+<Input value={name} onChange={setName} label="Name" />
+```
+
+**Fonctionnement étape par étape :**
+
+1. La référence conserve le titre d'origine pendant la vie du composant.
+2. Le premier effet prévoit sa restauration au démontage.
+3. L'utilisateur saisit `Alice` : `setName` modifie le state et provoque un rendu.
+4. Le hook reçoit `Editer Alice`.
+5. L'effet dépendant de `[title]` met à jour le titre de l'onglet.
+6. Si le champ est vidé, le hook reçoit `null` et rétablit le titre initial.
+7. Si le composant est démonté, le nettoyage restaure aussi ce titre.
+
+Ce hook réunit les rôles de plusieurs hooks : le state du composant suit la saisie, la ref conserve le titre initial sans déclencher de rendu, et les effets synchronisent le titre du navigateur.
+
+**À noter :** `useDocumentTitle` n'a pas besoin de retourner une valeur. Son rôle est d'effectuer une synchronisation. Cette version utilise `document` et vise une exécution dans le navigateur.
+
+### 4. useFetch — Regrouper le chargement de données
+
+Dans `App`, les articles sont demandés avec :
+
+```jsx
+const {loading, data, errors} = useFetch(
+  'https://jsonplaceholder.typicode.com/posts?_limit=10&_delay=2000'
+);
+```
+
+Le hook possède trois états :
+
+```jsx
+const [loading, setLoading] = useState(true);
+const [data, setData] = useState(null);
+const [errors, setErrors] = useState(null);
+```
+
+| État | Rôle | Valeur initiale |
+|---|---|---|
+| `loading` | Indiquer si la requête est en cours | `true` |
+| `data` | Conserver les données reçues | `null` |
+| `errors` | Conserver une erreur interceptée | `null` |
+
+Ces informations sont distinctes : le composant doit pouvoir afficher une attente, les résultats ou une erreur.
+
+Le code de chargement de l'exercice est :
+
+```jsx
+useEffect(() => {
+  fetch(url, {
+    ...options,
+    headers: {
+      'Accept': 'application/json; charset=UTF-8',
+      ...options.headers
+    }
+  })
+    .then(r => r.json())
+    .then(data => {
+      setLoading(false);
+      setData(data);
+    })
+    .catch(e => {
+      setErrors(e);
+    })
+    .finally(() => {
+      setLoading(false);
+    });
+}, []);
+
+return {loading, data, errors};
+```
+
+**Fonctionnement étape par étape :**
+
+1. Au premier rendu, `loading` vaut `true` : le composant peut afficher un message d'attente.
+2. Après le rendu, l'effet lance `fetch`.
+3. `...options` transmet les options de la requête, et `...options.headers` complète ou remplace les en-têtes définis par défaut.
+4. `r.json()` lit la réponse et convertit son contenu JSON en données JavaScript. Cette opération est elle aussi asynchrone.
+5. En cas de succès, `setData(data)` conserve les articles et demande un nouveau rendu.
+6. Si une promesse échoue, `catch` conserve l'erreur avec `setErrors`.
+7. `finally` met fin à l'attente, que la requête ait réussi ou échoué.
+8. Le hook retourne les valeurs actuelles des trois états à chaque rendu.
+
+**Important :** les setters dans les callbacks de la requête sont utiles : ils permettent à React de tenir compte du résultat d'une opération extérieure. Ce n'est pas une simple copie d'état inutile dans un effet.
+
+### 5. Afficher les différentes étapes du chargement
+
+```jsx
+{loading && <div>Loading...</div>}
+{errors && <div>{errors.toString()}</div>}
+{data && <div>
+  <ul>
+    {data.map(post => (
+      <li key={post.id}>{post.title}</li>
+    ))}
+  </ul>
+</div>}
+```
+
+- `loading && ...` : affiche l'attente lorsque le chargement est actif.
+- `errors && ...` : affiche l'erreur si elle existe.
+- `data && ...` : évite d'appeler `.map()` sur la valeur initiale `null`.
+- `data.map(...)` : transforme les articles en éléments de liste.
+- `key={post.id}` : donne à React une clé stable pour identifier chaque article.
+
+Ici, le composant suppose que la réponse JSON est un tableau d'articles. Une autre API pourrait renvoyer un objet nécessitant une lecture différente.
+
+### 6. Règles et bonnes pratiques des hooks personnalisés
+
+- Commencer leur nom par `use` : `useToggle`, `useFetch`, etc.
+- Les appeler au premier niveau d'un composant ou d'un autre hook, jamais dans une condition, une boucle ou un handler.
+- Regrouper une logique cohérente et nommer le hook selon ce qu'il fait.
+- Retourner uniquement les valeurs et fonctions nécessaires au composant.
+- Garder les dépendances et nettoyages des effets corrects : déplacer le code dans un hook ne supprime pas ces obligations.
+- Se rappeler que chaque appel possède ses propres états et références.
+
+**À retenir :** un hook personnalisé permet d'écrire « ce dont le composant a besoin » avec des appels comme `useToggle()` ou `useFetch(url)`, tandis que les détails restent dans les hooks. Il ne remplace pas `useState`, `useEffect` ou `useRef` : il les assemble pour rendre une logique plus facile à lire et à réutiliser.
+
+## 9. Mémoïsation et useCallback — Éviter des rendus inutiles
+
+Cette partie montre comment associer **`memo` et `useCallback`** pour permettre à un composant enfant de réutiliser son rendu lorsque ses props n'ont pas changé.
+
+Dans l'exercice, `App` contient un champ « Prénom », affiche sa valeur en majuscules et transmet une fonction de clic à un bloc d'information `InfoMemo`.
+
+### 1. Comprendre pourquoi le composant enfant se réexécute
+
+```jsx
+const [name, setName] = useState('');
+
+<Input label="Prénom" onChange={setName} value={name} />
+<div>{name.toUpperCase()}</div>
+```
+
+1. L'utilisateur modifie le champ.
+2. `Input` appelle `setName` avec le texte saisi.
+3. React réexécute `App` pour calculer le nouvel affichage.
+4. Par défaut, React effectue aussi le rendu des composants enfants.
+
+Même si le texte du bloc d'information est fixe, sa fonction de composant peut donc être rappelée. Un rendu React ne signifie pas nécessairement que le DOM du navigateur est modifié : React applique les changements nécessaires à l'interface.
+
+### 2. memo — Réutiliser le rendu d'un composant
+
+```jsx
+const InfoMemo = memo(function Info({onClick}) {
+  console.log('Info', 'render');
+
+  return <div className="alert alert-info" onClick={onClick}>
+    Lorem ipsum dolor sit amet, consetetur adipiscing elit.
+  </div>;
+});
+```
+
+- `memo` enveloppe un composant pour permettre à React d'éviter un rendu provoqué par son parent si ses props sont identiques.
+- `console.log('Info', 'render')` permet d'observer les appels du composant dans la console.
+- Ici, la prop à comparer est `onClick`.
+- `memo` est une fonction React, pas un hook.
+
+**Important :** `memo` est une optimisation, pas une garantie qu'un composant ne sera jamais réexécuté. Un changement de son propre state ou d'un contexte qu'il utilise peut toujours provoquer un rendu.
+
+### 3. Pourquoi memo seul ne suffit pas avec une fonction recréée
+
+Sans `useCallback`, on pourrait écrire dans `App` :
+
+```jsx
+const handleClick = () => {
+  console.log(name.length);
+};
+
+// Dans le JSX :
+<InfoMemo onClick={handleClick} />
+```
+
+À chaque exécution de `App`, JavaScript crée une nouvelle fonction `handleClick`. Son code peut être identique, mais son identité est différente :
+
+```jsx
+const first = () => {};
+const second = () => {};
+
+first === second; // false
+```
+
+Pour `memo`, la prop `onClick` a donc changé. React ne peut pas éviter ce rendu sur la base de props identiques.
+
+La comparaison par défaut se fait prop par prop avec `Object.is`. Les objets, tableaux et fonctions sont comparés selon leur identité, sans analyser tout leur contenu.
+
+### 4. useCallback — Conserver l'identité d'une fonction
+
+Le code de l'exercice utilise :
+
+```jsx
+const handleClick = useCallback(() => {
+  console.log(name.length);
+}, [name.length]);
+```
+
+On peut lire cette écriture ainsi :
+
+> « Fournis la même fonction tant que la longueur du prénom ne change pas. »
+
+- La fonction sera exécutée lors du clic, pas lors de l'appel à `useCallback`.
+- `[name.length]` indique la valeur dont dépend son résultat dans cet exemple.
+- Si la longueur est identique, React peut retourner la fonction précédemment conservée.
+- Si la longueur change, React retourne la nouvelle fonction fournie par ce rendu.
+
+**Nuance :** une fonction fléchée est toujours créée dans l'expression exécutée par `App`. `useCallback` permet de réutiliser l'identité de la fonction précédente ; il ne rend pas son exécution plus rapide.
+
+### 5. Suivre le comportement de l'exercice
+
+```jsx
+<InfoMemo onClick={handleClick} />
+```
+
+| Action | Longueur du prénom | Conséquence attendue de l'optimisation |
+|---|---:|---|
+| Premier affichage | 0 | `InfoMemo` effectue son rendu |
+| Saisir `Alice` | 5 | La dépendance change : nouvelle fonction et rendu de l'enfant |
+| Remplacer `Alice` par `Marie` | 5 | Même longueur : fonction conservée, rendu de l'enfant évitable |
+| Remplacer `Marie` par `Paul` | 4 | Nouvelle longueur : nouvelle fonction et rendu de l'enfant |
+| Cliquer sur le bloc | 4 | Le callback affiche `4` dans la console |
+
+Dans tous les cas, `App` se réexécute lorsque `name` change et le prénom en majuscules est actualisé. L'optimisation concerne le composant enfant.
+
+**Pourquoi garder une fonction liée à un ancien prénom peut fonctionner ici ?** Si `Alice` est remplacé par `Marie`, la fonction conservée peut encore capturer `Alice`. Mais elle ne fait qu'afficher sa longueur : `5` est aussi la longueur de `Marie`.
+
+Pour rendre cette intention plus explicite, on peut extraire la longueur :
+
+```jsx
+const nameLength = name.length;
+
+const handleClick = useCallback(() => {
+  console.log(nameLength);
+}, [nameLength]);
+```
+
+Si le callback doit afficher le prénom lui-même, il faut dépendre de `[name]` :
+
+```jsx
+const handleClick = useCallback(() => {
+  console.log(name);
+}, [name]);
+```
+
+**Important :** les dépendances doivent correspondre aux données réellement utilisées. Les réduire artificiellement pour éviter un rendu risque de conserver des valeurs obsolètes.
+
+### 6. Distinguer memo, useMemo et useCallback
+
+| Outil | Ce qui est réutilisé | Exemple |
+|---|---|---|
+| `memo` | Le rendu d'un composant quand ses props sont identiques | `memo(Info)` |
+| `useMemo` | Le résultat d'un calcul | `useMemo(() => calculate(data), [data])` |
+| `useCallback` | L'identité d'une fonction | `useCallback(() => doSomething(value), [value])` |
+
+**À retenir :** `useMemo` fournit le résultat d'une fonction ; `useCallback` fournit la fonction elle-même, qui pourra être appelée plus tard.
+
+### 7. Quand utiliser cette optimisation ?
+
+Cette association devient intéressante lorsqu'un enfant coûteux à rendre reçoit des props souvent identiques, alors que son parent se réexécute fréquemment.
+
+Dans l'exercice, le bloc de texte est simple et le clic ne fait qu'un `console.log` : l'intérêt est surtout pédagogique. Il n'est pas nécessaire de placer `memo` et `useCallback` partout.
+
+- Ne pas utiliser ces outils pour corriger une logique incorrecte : le composant doit fonctionner sans cette optimisation.
+- Un callback stable ne suffit pas à empêcher les rendus d'un enfant ordinaire : ici, c'est son association avec `memo` qui permet d'en éviter.
+- Une autre prop recréée à chaque rendu, comme un objet ou un tableau, peut empêcher `memo` de réutiliser le rendu.
+- En développement avec `StrictMode`, React peut appeler les composants plusieurs fois pour détecter des erreurs. Les logs ne correspondent donc pas toujours à un seul appel par interaction.
+
+**À retenir :** commencer par une logique simple qui fonctionne. Si des rendus inutiles deviennent coûteux, `memo` peut optimiser l'enfant et `useCallback` stabiliser les fonctions qui lui sont transmises.
