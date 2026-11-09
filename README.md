@@ -760,6 +760,39 @@ Sans nettoyage, les timers ou écouteurs peuvent s'accumuler lors des réinstall
 
 **À retenir :** utiliser un effet pour installer ou mettre à jour une synchronisation extérieure, déclarer ses dépendances et nettoyer ce qui a été installé. Garder les actions liées à la saisie dans les handlers, les calculs dans le rendu, et les fonctions de mise à jour du state pures.
 
+## 6. useMemo — Mémoriser le résultat d'un calcul
+
+`useMemo` permet de réutiliser un résultat entre deux rendus tant que ses dépendances restent identiques.
+
+### Exemple : la sécurité du mot de passe
+
+```jsx
+const [firstname, setFirstname] = useState('John')
+const [password, setPassword] = useState('MotdePasse')
+
+const security = useMemo(() => {
+    return passwordSecurity(password)
+}, [password])
+```
+
+Au premier rendu, React appelle `passwordSecurity` et conserve son résultat. Si `firstname` change, le composant se réexécute, mais React peut réutiliser le résultat : `password` n'a pas changé. Si `password` change, le calcul est refait.
+
+La fonction fléchée est le calcul à effectuer ; `[password]` indique les valeurs dont il dépend. Le calcul doit rester pur : ne pas y lancer de requête ni modifier un état.
+
+Dans cet exercice, le calcul ne teste que la longueur du mot de passe : la mémorisation est pédagogique, pas nécessaire pour les performances. Ces seuils ne constituent pas une véritable mesure de sécurité.
+
+### Distinguer les usages
+
+| Outil | Rôle |
+|---|---|
+| `useState` | Conserver un état qui commande l'affichage |
+| `useMemo` | Réutiliser le résultat d'un calcul |
+| `useEffect` | Synchroniser le composant avec un système extérieur |
+| `useCallback` | Conserver l'identité d'une fonction |
+
+Commencer sans `useMemo`, puis l'utiliser si un calcul coûteux justifie cette optimisation. Le fonctionnement du composant ne doit pas dépendre de la conservation du cache.
+
+
 ## 7. useRef — Conserver une valeur sans déclencher de rendu
 
 Le hook `useRef` permet de **conserver une valeur entre les rendus sans déclencher de nouveau rendu lorsqu'on la modifie**.
@@ -1294,3 +1327,512 @@ Dans l'exercice, le bloc de texte est simple et le clic ne fait qu'un `console.l
 - En développement avec `StrictMode`, React peut appeler les composants plusieurs fois pour détecter des erreurs. Les logs ne correspondent donc pas toujours à un seul appel par interaction.
 
 **À retenir :** commencer par une logique simple qui fonctionne. Si des rendus inutiles deviennent coûteux, `memo` peut optimiser l'enfant et `useCallback` stabiliser les fonctions qui lui sont transmises.
+
+## 10. Les portails React
+
+Cet exercice montre comment afficher une modale en dehors du conteneur DOM de son composant parent avec `createPortal`.
+
+### Le problème de départ
+
+Dans `src/App.jsx`, le composant `App` affiche trois paragraphes et un composant `Modal` dans un conteneur avec les styles suivants :
+
+```jsx
+height: 300,
+overflowY: 'scroll',
+background: '#EEE',
+margin: 20,
+position: 'relative'
+```
+
+Sans portail, la modale serait un élément DOM de ce conteneur. Avec `position: 'absolute'`, `top: 0` et `right: 0`, elle serait positionnée par rapport à ce parent en `position: 'relative'` et soumise à son contexte de défilement.
+
+### Utiliser createPortal
+
+On importe `createPortal` depuis `react-dom` :
+
+```jsx
+import {createPortal} from "react-dom";
+```
+
+La fonction reçoit le contenu à afficher et le nœud DOM dans lequel le placer :
+
+```jsx
+createPortal(contenu, conteneurDOM)
+```
+
+Dans cet exercice, `Modal` utilise `document.body` comme destination :
+
+```jsx
+function Modal() {
+    return createPortal(<div style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        padding: 10,
+        border: 'solid 1px grey',
+        background: '#FFF'
+    }}>
+        Je suis une modale
+    </div>, document.body);
+}
+```
+
+L'appel reste à sa place dans le JSX de `App` :
+
+```jsx
+<Modal />
+```
+
+Mais le `<div>` produit par `Modal` est ajouté dans `document.body`, en dehors du conteneur gris. Il échappe donc au défilement et au positionnement relatif de ce conteneur.
+
+### Arbre React et arbre DOM
+
+Le portail change l'emplacement dans le DOM, mais `Modal` reste un enfant de `App` dans l'arbre React. Les props, le contexte et la propagation des événements React continuent de suivre cet arbre React.
+
+Pour observer la différence, ouvrir les outils de développement du navigateur et repérer le texte « Je suis une modale » : son élément se trouve directement sous `<body>`, à côté du conteneur racine de l'application.
+
+### À retenir
+
+- Un portail permet de choisir un autre emplacement DOM pour un contenu React.
+- Le nœud DOM de destination doit déjà exister.
+- Un portail est utile pour les modales, les infobulles et les menus qui doivent sortir d'un conteneur.
+- Il ne fournit pas automatiquement un fond assombri, la gestion du focus ou la fermeture au clavier.
+- Ici, la modale utilise `position: 'absolute'`. Pour la maintenir dans un coin de la fenêtre pendant le défilement de la page, on pourrait utiliser `position: 'fixed'`.
+
+### Lancer le projet
+
+Depuis le dossier `10- portails` :
+
+```bash
+npm install
+npm run dev
+```
+
+Pour générer la version de production :
+
+```bash
+npm run build
+```
+
+## 11. ErrorBoundary — Afficher une interface de secours
+
+Une frontière d'erreur permet d'afficher un message de secours si un composant enfant échoue pendant son rendu, au lieu de perdre toute cette partie de l'interface.
+
+### Utilisation dans la liste de produits
+
+Le fichier `src/App.jsx` utilise la bibliothèque `react-error-boundary` :
+
+```jsx
+import {ErrorBoundary} from 'react-error-boundary'
+
+<ErrorBoundary
+    FallbackComponent={AlertError}
+    onReset={() => console.log('reset')}
+>
+    <ProductTable products={visibleProducts} />
+</ErrorBoundary>
+```
+
+Seul le tableau est protégé ici : la barre de recherche reste en dehors de la frontière.
+
+### Le composant de secours
+
+```jsx
+function AlertError({error, resetErrorBoundary}) {
+    return <div className="alert alert-danger">
+        {error.toString()}
+        <button onClick={resetErrorBoundary}>Reset</button>
+    </div>
+}
+```
+
+- `error` contient l'erreur interceptée.
+- `resetErrorBoundary` permet de tenter à nouveau le rendu des enfants.
+- `onReset` permet au parent de réinitialiser les données responsables du problème. Ici, il fait seulement un log : une erreur toujours présente peut donc se reproduire après Reset.
+
+On transmet la fonction composant avec `FallbackComponent={AlertError}`, sans l'appeler et sans écrire `<AlertError />` à cet endroit. Son nom doit correspondre exactement à sa déclaration, majuscules comprises.
+
+### Ce que la frontière ne remplace pas
+
+Une erreur de requête dans une promesse ou une erreur dans un gestionnaire de clic n'est pas automatiquement interceptée par cette frontière. Une requête doit gérer ses échecs avec `catch`, puis afficher un état d'erreur si nécessaire.
+
+Une frontière ne protège pas non plus contre une erreur dans son propre composant de secours. Si une erreur survient avant que les enfants soient rendus, dans le composant qui crée la frontière, il faut une frontière placée plus haut.
+
+### La version en classe
+
+Le projet conserve aussi `src/components/ErrorBoundary.jsx`, une implémentation pédagogique en classe :
+
+- `getDerivedStateFromError` active l'état d'erreur.
+- `componentDidCatch` permet de journaliser l'erreur.
+- `render` affiche `props.fallback` ou `props.children`.
+
+Ce fichier n'est pas celui importé dans `App.jsx`. Il ne propose pas la même API que la bibliothèque : sa prop est `fallback`, pas `FallbackComponent`.
+
+### Lancer l'exercice
+
+Depuis ce dossier : `npm install`, puis `npm run dev`. Pour compiler : `npm run build`.
+
+## 12. TP Blog — Relier les notions du cours
+
+Ce TP combine navigation, chargement des articles, composants réutilisables, formulaire d'édition, modale et gestion des erreurs. Ce document décrit le code actuel et distingue son intention des points restant à améliorer.
+
+### 1. Vue d'ensemble
+
+| Élément | Responsabilité |
+|---|---|
+| `App` | Choisir la page et entourer son rendu d'une frontière d'erreur |
+| `Header` | Afficher la navigation et gérer son menu repliable |
+| `Home` | Afficher la liste des articles |
+| `Single` | Charger et afficher un article, gérer son édition |
+| `EditPostModal` | Lire le formulaire et envoyer la modification |
+| `Modal` | Afficher un dialogue natif dans un portail |
+
+Les valeurs descendent par les props. Les enfants demandent une action au parent en appelant les fonctions reçues, comme `onSave` et `onClose`.
+
+### 2. Navigation avec useHashNavigation
+
+Le hash est la partie de l'URL commençant par `#`.
+
+| Hash | `page` | `param` |
+|---|---|---|
+| vide ou `#` | `home` | `undefined` |
+| `#contact` | `contact` | `undefined` |
+| `#post:3` | `post` | `"3"` |
+
+Le hook initialise un state avec `location.hash`. Son effet installe un écouteur `hashchange` qui met ce state à jour. Au démontage, le nettoyage retire l'écouteur.
+
+```jsx
+const {page, param} = useHashNavigation()
+```
+
+`App` utilise ces valeurs pour retourner `Home`, `Contact`, `Single` ou `NotFound`. Le paramètre reste une chaîne ; il faut le convertir si un calcul numérique est nécessaire.
+
+### 3. Menu responsive avec useToggle
+
+```jsx
+const [expanded, toggleExpanded] = useToggle(false)
+
+<button onClick={toggleExpanded}>Menu</button>
+<div className={`collapse navbar-collapse ${expanded ? 'show' : ''}`}>
+    {/* liens */}
+</div>
+```
+
+`useToggle` encapsule un `useState` et renvoie la valeur ainsi qu'une fonction d'inversion :
+
+```jsx
+const toggle = () => setState(previous => !previous)
+```
+
+Au clic, le state change, React refait le rendu, puis la classe `show` est ajoutée ou retirée. Le CSS Bootstrap gère la présentation selon la taille d'écran. `aria-expanded` communique l'état aux technologies d'assistance.
+
+### 4. Charger un article avec useFetch
+
+```jsx
+const {data: post, loading, error, setData} = useFetch(url)
+```
+
+`data: post` renomme localement la propriété `data`. Le hook conserve les données, le chargement et l'erreur dans trois states. Son effet lance la requête lorsque l'URL change.
+
+```jsx
+if (loading) return <Spinner />
+if (error) return <Alert type="danger">{error.toString()}</Alert>
+```
+
+`setData` permet aussi de mettre à jour localement l'article après édition, sans refaire une requête de lecture.
+
+#### useRefSync et les options
+
+```jsx
+function useRefSync(data) {
+    const dataRef = useRef(data)
+    dataRef.current = data
+    return dataRef
+}
+```
+
+Dans cette implémentation du cours, `useRef` conserve le même objet entre les rendus ; l'affectation actualise son contenu. Changer `.current` ne déclenche pas de rendu.
+
+`useFetch` conserve ainsi les options dans une référence alors que son effet dépend de `[url]`. Changer les options seules ne déclenche donc pas de nouvelle requête. Ce mécanisme n'est pas indispensable à toutes les requêtes : pour un appel immédiat dans l'effet, utiliser directement les options du rendu correspondant fonctionnerait aussi, mais leur gestion dans les dépendances serait à traiter.
+
+Cette écriture dans une référence pendant le rendu est une technique présente dans le TP, pas un réflexe à généraliser. Pour débuter, privilégier les usages simples de `useRef`, notamment l'accès au DOM.
+
+### 5. Les hooks doivent rester avant les retours conditionnels
+
+```jsx
+const {data: post, loading, error} = useFetch(url)
+useDocumentTitle(post?.title)
+const [isEditing, toggleEditing] = useToggle(false)
+
+if (loading) return <Spinner />
+```
+
+Ne pas placer `useDocumentTitle(post.title)` après le retour du chargement : cet appel serait absent du premier rendu, puis présent au suivant. Les hooks utilisés ici doivent être appelés dans le même ordre à chaque rendu du composant.
+
+`post?.title` donne `undefined` si l'article n'est pas encore disponible. Le hook `useDocumentTitle` conserve le titre initial dans une référence, actualise le titre avec un effet et restaure le titre initial au démontage.
+
+### 6. Formulaire et useId
+
+Le composant `Input` génère un identifiant avec `useId` pour relier le label et le champ :
+
+```jsx
+const id = useId()
+
+<label htmlFor={id}>Titre</label>
+<input id={id} name="title" defaultValue={post.title} />
+```
+
+Le TP utilise des champs non contrôlés : le navigateur garde la saisie, `defaultValue` fournit sa valeur initiale et `name` donne la clé utilisée à la soumission.
+
+```jsx
+const data = new FormData(e.target)
+const values = Object.fromEntries(data.entries())
+// Exemple : {title: 'Nouveau titre', body: 'Nouveau contenu'}
+```
+
+`e.preventDefault()` empêche la soumission native de recharger la page. Pour une lecture plus explicite du formulaire dans son gestionnaire, on peut utiliser `e.currentTarget`.
+
+### 7. Sauvegarde et communication avec le parent
+
+Après la requête PUT, `EditPostModal` appelle :
+
+```jsx
+onSave(Object.fromEntries(data.entries()))
+```
+
+Le parent `Single` traite ces valeurs :
+
+```jsx
+const handleSave = (data) => {
+    setData({...post, ...data})
+    toggleEditing()
+}
+```
+
+Le nouvel objet conserve les propriétés de l'article et remplace celles du formulaire. L'état d'édition passe à `false` : React retire la modale.
+
+```jsx
+{isEditing && <EditPostModal
+    post={post}
+    onClose={toggleEditing}
+    onSave={handleSave}
+/>}
+```
+
+Les noms des props sont importants : envoyer `toggleEditing={toggleEditing}` ne fournit pas une prop `onClose`. Le bouton Annuler doit recevoir la fonction attendue.
+
+La sauvegarde attend la résolution de la requête. En cas de rejet, le composant affiche l'erreur et garde la modale ouverte. Le bouton est désactivé pendant le chargement.
+
+### 8. Modale : useRef, useEffect et portail
+
+```jsx
+const dialogRef = useRef(null)
+
+useEffect(() => {
+    dialogRef.current.showModal()
+}, [])
+```
+
+`ref={dialogRef}` donne accès à l'élément HTML `<dialog>`. L'effet appelle sa méthode `showModal` après son insertion dans le DOM.
+
+Le portail place le dialogue dans `document.body`, même si le composant reste un enfant de `Single` dans l'arbre React. Le gestionnaire d'annulation empêche l'action native et appelle `onClose` : le parent retire ensuite le composant en changeant son state.
+
+En développement, StrictMode peut effectuer un cycle supplémentaire d'installation et de nettoyage des effets ; les effets doivent supporter un nettoyage approprié.
+
+### 9. Erreurs de rendu et erreurs réseau
+
+`App` utilise `ErrorBoundary` et `FallbackComponent={PageError}` pour afficher une alerte si un enfant échoue pendant son rendu. Le nom `PageError` doit correspondre à la déclaration, majuscule comprise.
+
+Les erreurs des promesses réseau restent gérées avec `catch` et les states d'erreur. La frontière ne les intercepte pas automatiquement.
+
+### 10. Points à vérifier dans le code actuel
+
+Ces observations documentent les limites du TP ; elles ne sont pas des corrections déjà appliquées :
+
+- Dans `useFetch`, remplacer `...optionsRef` par `...optionsRef.current` pour transmettre les options contenues dans la référence.
+- Vérifier `response.ok` avant de considérer une réponse HTTP comme réussie : `fetch` ne rejette pas automatiquement les statuts 404 ou 500.
+- Lors d'un changement d'URL, réinitialiser le chargement et l'erreur ; gérer aussi les réponses arrivant dans le désordre, par exemple avec une annulation et un nettoyage.
+- Dans `Input`, `type` est extrait des props pour choisir entre `input` et `textarea`, mais il n'est pas transmis aux vrais champs `input`. Un futur champ email ou password doit recevoir son type.
+- Une frontière d'erreur affichant son secours doit être réinitialisée pour retenter le rendu ; changer de hash seul ne la réinitialise pas automatiquement dans la version actuelle.
+- JSONPlaceholder simule les modifications : une sauvegarde ne constitue pas un stockage durable côté serveur. Ici, la mise à jour visible repose sur le state local.
+
+### 11. Repères pour réviser
+
+| Besoin | Outil |
+|---|---|
+| Modifier une donnée et actualiser l'écran | `useState` |
+| Synchroniser avec réseau, navigateur ou événements | `useEffect` |
+| Accéder à un élément HTML ou conserver une valeur sans rendu | `useRef` |
+| Relier un label et un champ avec un identifiant | `useId` |
+| Réutiliser une logique construite avec des hooks | Hook personnalisé |
+
+`toggle` désigne une fonction ; `toggle()` l'exécute immédiatement ; `() => toggle()` crée une fonction qui l'exécutera plus tard. Dans `onClick`, on fournit la fonction à appeler au clic.
+
+### Lancer le TP
+
+Depuis ce dossier : `npm install`, puis `npm run dev`. Pour compiler : `npm run build`.
+
+## 13. Chargement asynchrone — Charger une page avec lazy et Suspense
+
+Cette partie reprend le blog et ajoute **le chargement du code de la page d'un article uniquement lorsqu'on souhaite l'afficher**.
+
+Jusqu'ici, les articles étaient récupérés de manière asynchrone avec `fetch`. On ajoute maintenant une autre opération : charger le fichier JavaScript qui contient le composant `Single`.
+
+### 1. Distinguer le chargement du code et celui des données
+
+| Opération | Outil | Exemple |
+|---|---|---|
+| Charger le code d'une page | `import()` et `lazy` | Récupérer le composant `Single` |
+| Afficher une attente pendant ce chargement | `Suspense` | Afficher `Loading...` |
+| Charger les données d'un article | `fetch` dans `useFetch` | Récupérer l'article demandé |
+| Afficher l'attente des données | State `loading` | Afficher `Spinner` |
+
+**Important :** dans ce projet, `Suspense` ne remplace pas le state `loading` de `useFetch`. Le `fetch` lancé dans un effet n'est pas automatiquement pris en charge par `Suspense`.
+
+### 2. Passer d'un import classique à un import dynamique
+
+Un import classique déclare une dépendance chargée avec le module qui l'utilise :
+
+```jsx
+import Single from './pages/Single.jsx';
+```
+
+Un import dynamique est un appel qui retourne une promesse :
+
+```jsx
+import('./pages/Single.jsx');
+```
+
+Il permet de demander le module plus tard. Lors de la compilation, Vite peut séparer cette dépendance en un fichier JavaScript distinct : c'est le **découpage du code** (*code splitting*).
+
+Cela peut alléger le code nécessaire au premier affichage. En contrepartie, une première visite de la page peut nécessiter une requête supplémentaire pour obtenir son code.
+
+### 3. lazy — Transformer cet import en composant React
+
+```jsx
+import {lazy, Suspense} from 'react';
+
+const SingleLazy = lazy(() => import('./pages/Single.jsx'));
+```
+
+- `lazy` reçoit une fonction qui lance l'import dynamique.
+- React appelle cette fonction lorsqu'il tente pour la première fois d'afficher `SingleLazy`.
+- Pendant le chargement, le composant n'est pas encore prêt à être affiché.
+- Une fois le module disponible, React utilise son export `default` comme composant.
+
+Dans `Single.jsx`, l'export correspond bien à cette attente :
+
+```jsx
+export default function Single({postId}) {
+  // Affichage de l'article.
+}
+```
+
+**À retenir :** `lazy` est une fonction React, pas un hook. Elle crée un composant chargé à la demande.
+
+### 4. Suspense — Afficher un contenu provisoire
+
+Dans la branche dédiée aux articles, le projet utilise :
+
+```jsx
+return <Suspense fallback={<div>Loading...</div>}>
+  <SingleLazy postId={param} />
+</Suspense>;
+```
+
+- `Suspense` entoure le composant chargé à la demande.
+- `fallback` contient l'interface provisoire à afficher pendant l'attente.
+- Quand le code est disponible, React peut remplacer ce contenu par `Single`.
+- `postId={param}` transmet toujours l'identifiant provenant du hash de l'URL.
+
+Le contenu de `fallback` peut être un texte ou un composant comme `<Spinner />`.
+
+### 5. Suivre une visite d'article étape par étape
+
+1. L'utilisateur ouvre un lien comme `#post:3`.
+2. `useHashNavigation` fournit `page = 'post'` et l'identifiant `3`.
+3. `getPageContent` retourne la branche contenant `SingleLazy` et `Suspense`.
+4. React demande le module de la page avec l'import dynamique.
+5. Si le code n'est pas encore disponible, `Suspense` affiche `Loading...`.
+6. Quand le module est chargé, React peut rendre `Single` avec `postId = 3`.
+7. Le hook `useFetch` de `Single` lance alors la récupération des données de l'article.
+8. Pendant cette deuxième attente, `Single` retourne son propre `<Spinner />`.
+9. Lorsque les données arrivent, le titre, l'image et le contenu de l'article sont affichés.
+
+```text
+Navigation vers #post:3
+        ↓
+Chargement du code de Single → attente gérée par Suspense
+        ↓
+Rendu de Single et lancement de useFetch
+        ↓
+Chargement des données → attente gérée par loading et Spinner
+        ↓
+Affichage de l'article
+```
+
+Les étapes de chargement peuvent être très rapides ou bénéficier du cache : les deux indicateurs ne sont pas nécessairement visibles longtemps.
+
+### 6. Déclarer le composant lazy en dehors des fonctions de rendu
+
+Dans le code actuel, `SingleLazy` est créé à l'intérieur de `getPageContent`, dans la condition `page === 'post'` :
+
+```jsx
+if (page === 'post') {
+  const SingleLazy = lazy(() => import('./pages/Single'));
+  // ...
+}
+```
+
+**Point à améliorer :** chaque passage dans cette branche crée un nouveau type de composant lazy. Cela peut provoquer un remontage et réinitialiser les états de la page. Le cache du module ne garantit pas la stabilité de l'identité du composant React.
+
+La déclaration recommandée se place au niveau du module, après les imports :
+
+```jsx
+const SingleLazy = lazy(() => import('./pages/Single.jsx'));
+
+function getPageContent(page, param) {
+  if (page === 'home') return <Home />;
+  if (page === 'contact') return <Contact />;
+
+  if (page === 'post') {
+    return <Suspense fallback={<div>Loading...</div>}>
+      <SingleLazy postId={param} />
+    </Suspense>;
+  }
+
+  return <NotFound page={page} />;
+}
+```
+
+Cette déclaration ne charge pas immédiatement la page : elle crée une identité stable pour le composant, tandis que l'import reste déclenché à sa première utilisation.
+
+Cet exemple documente une amélioration ; il ne signifie pas que le code source a été modifié.
+
+### 7. Distinguer attente et erreur
+
+Le projet conserve une frontière d'erreur autour du contenu de la page :
+
+```jsx
+<ErrorBoundary FallbackComponent={PageError}>
+  {pageContent}
+</ErrorBoundary>
+```
+
+- **Module en cours de chargement :** `Suspense` affiche son `fallback`.
+- **Import dynamique rejeté :** React transmet l'erreur à la frontière d'erreur la plus proche, qui peut afficher `PageError`.
+- **Échec de la requête d'article :** le hook `useFetch` conserve l'erreur dans son state, et `Single` affiche son alerte.
+
+`Suspense` est une interface d'attente ; il ne constitue pas à lui seul une gestion des erreurs ni un mécanisme de nouvelle tentative.
+
+### 8. Bonnes pratiques et limites
+
+- Charger à la demande des pages ou fonctionnalités assez importantes pour justifier une séparation du code.
+- Garder les composants lazy au niveau du module pour préserver leur identité.
+- Prévoir une interface d'attente compréhensible et une gestion distincte des erreurs.
+- Ne pas confondre le chargement du code avec celui des données.
+- Dans cette version, `Home` et `Contact` restent importés normalement ; seule la page `Single` utilise `lazy`.
+- `EditPostModal` est encore importé normalement par `Single` : il n'a pas son propre chargement déclenché au clic sur « Éditer l'article ».
+- Le chargement à la demande ne corrige pas les limites de `useFetch` présentées dans la partie précédente, notamment le nettoyage des requêtes et la gestion d'un changement d'URL.
+
+**À retenir :** `lazy` permet de charger le code d'un composant à sa première utilisation, `Suspense` affiche une attente pendant ce chargement, puis `useFetch` récupère les données nécessaires à la page. Ce sont deux chargements différents, avec leurs propres interfaces d'attente.
