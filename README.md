@@ -1836,3 +1836,474 @@ Le projet conserve une frontière d'erreur autour du contenu de la page :
 - Le chargement à la demande ne corrige pas les limites de `useFetch` présentées dans la partie précédente, notamment le nettoyage des requêtes et la gestion d'un changement d'URL.
 
 **À retenir :** `lazy` permet de charger le code d'un composant à sa première utilisation, `Suspense` affiche une attente pendant ce chargement, puis `useFetch` récupère les données nécessaires à la page. Ce sont deux chargements différents, avec leurs propres interfaces d'attente.
+
+## 14. useReducer — Organiser les changements d'une liste de tâches
+
+Cette partie permet de cocher une tâche, de la supprimer, de supprimer les tâches terminées et de masquer ou afficher celles-ci.
+
+**Le besoin concret :** plusieurs boutons modifient les mêmes données. `useReducer` permet de regrouper les règles de modification dans une seule fonction, appelée ici `todoReducer`.
+
+### 1. Partir des données à conserver
+
+Le hook personnalisé `useTodos` initialise les données avec `useReducer` :
+
+```jsx
+const [state, dispatch] = useReducer(todoReducer, {
+  showCompleted: true,
+  todos: [
+    {name: 'Faire les courses', checked: false},
+    {name: 'Ranger les courses', checked: false},
+    {name: 'Manger les courses', checked: false}
+  ]
+});
+```
+
+- `state` contient les données actuelles : les tâches et le choix d'affichage.
+- `todos` est le tableau des tâches.
+- `checked` vaut `true` pour une tâche terminée et `false` sinon.
+- `showCompleted` indique si les tâches terminées doivent aussi être visibles.
+- `dispatch` permet d'envoyer une demande de changement.
+- `todoReducer` reçoit cette demande et calcule les prochaines données.
+
+Avec `useState`, on appelle un setter avec une nouvelle valeur. Avec `useReducer`, on décrit une action à effectuer et la fonction reducer applique la règle correspondante. Les deux servent à gérer un état ; `useReducer` n'est pas obligatoire pour une liste de tâches.
+
+### 2. Décrire ce qui doit changer avec une action
+
+Pour demander la suppression d'une tâche :
+
+```jsx
+dispatch({type: 'REMOVE_TODO', payload: todo});
+```
+
+Cet objet est simplement un message :
+
+- `type: 'REMOVE_TODO'` signifie « supprimer une tâche ».
+- `payload: todo` précise « voici la tâche à supprimer ».
+
+`type` et `payload` sont des noms choisis dans le code. React ne connaît pas la signification de `REMOVE_TODO` : c'est notre fonction `todoReducer` qui l'interprète.
+
+Une action n'a pas toujours besoin d'une tâche précise :
+
+```jsx
+dispatch({type: 'CLEAR_COMPLETED'});
+```
+
+Cette demande signifie « supprimer toutes les tâches terminées ».
+
+### 3. Comprendre le parcours d'un clic
+
+Le composant utilise les fonctions fournies par `useTodos` :
+
+```jsx
+const {
+  visibleTodos, removeTodo, clearCompleted,
+  toggleFilter, toggleTodo, showCompleted
+} = useTodos();
+```
+
+Pour supprimer une tâche, le parcours est :
+
+```text
+Clic sur le bouton Supprimer
+        ↓
+removeTodo(todo)
+        ↓
+dispatch({type: 'REMOVE_TODO', payload: todo})
+        ↓
+todoReducer reçoit les données actuelles et la demande
+        ↓
+Il retourne les données avec la tâche retirée
+        ↓
+React refait le rendu de la liste
+```
+
+Le reducer ne modifie pas lui-même la page : il retourne les prochaines données, puis React actualise l'affichage.
+
+### 4. REMOVE_TODO — Supprimer une tâche précise
+
+```jsx
+if (action.type === 'REMOVE_TODO') {
+  return {
+    ...state,
+    todos: state.todos.filter(todo => todo !== action.payload)
+  };
+}
+```
+
+`filter` crée un nouveau tableau en posant une question à chaque élément : **« Est-ce que je le garde ? »** Un résultat `true` conserve l'élément, un résultat `false` le retire.
+
+```jsx
+todo !== action.payload
+```
+
+Se lit ici : « Cette tâche est-elle différente de celle à supprimer ? »
+
+- Pour la tâche cliquée, la réponse est `false` : elle est retirée.
+- Pour les autres, la réponse est `true` : elles sont conservées.
+
+La comparaison fonctionne ici parce que `payload` contient exactement l'objet provenant de la liste. Ce n'est pas une comparaison de noms ou de contenu. Avec des tâches possédant un identifiant, on pourrait comparer leurs identifiants à la place.
+
+### 5. TOGGLE_TODO — Cocher ou décocher une tâche
+
+```jsx
+if (action.type === 'TOGGLE_TODO') {
+  return {
+    ...state,
+    todos: state.todos.map(todo => todo === action.payload ? {
+      ...todo,
+      checked: !todo.checked
+    } : todo)
+  };
+}
+```
+
+`map` construit un nouveau tableau en décidant quoi mettre à la place de chaque élément. Ici, on conserve le nombre de tâches mais on remplace la tâche choisie par une version avec la case inversée.
+
+La fonction passée à `map` peut aussi s'écrire avec des étapes explicites :
+
+```jsx
+todo => {
+  if (todo === action.payload) {
+    return {
+      ...todo,
+      checked: !todo.checked
+    };
+  }
+
+  return todo;
+}
+```
+
+- Si c'est la tâche choisie, on en crée une copie avec un nouveau `checked`.
+- Sinon, on retourne la tâche inchangée.
+- `!` donne le contraire d'un booléen : `true` devient `false`, et inversement.
+
+### 6. CLEAR_COMPLETED — Supprimer les tâches terminées
+
+Dans le code :
+
+```jsx
+if (action.type === 'CLEAR_COMPLETED') {
+  return {
+    ...state,
+    todos: state.todos.filter(todo => !todo.checked)
+  };
+}
+```
+
+Pour rendre l'intention plus explicite, la condition peut s'écrire :
+
+```jsx
+todos: state.todos.filter(todo => todo.checked === false)
+```
+
+Cela signifie : **« Garde les tâches qui ne sont pas cochées. »**
+
+La différence avec la suppression individuelle est la question posée :
+
+| Condition | Ce qu'elle regarde |
+|---|---|
+| `todo !== action.payload` | Est-ce une autre tâche que celle à supprimer ? |
+| `todo.checked === false` | Cette tâche est-elle décochée ? |
+
+**Ne pas confondre test, inversion et affectation :**
+
+```jsx
+todo.checked === false; // Teste si la valeur est false, sans la changer.
+!todo.checked;          // Donne le contraire de la valeur, sans la changer.
+todo.checked = false;   // Modifie la propriété : à éviter sur l'état existant.
+```
+
+Le test et l'inversion sont des opérations différentes, mais ici `checked` vaut toujours `true` ou `false`, donc ils fournissent les mêmes réponses :
+
+| `checked` | `checked === false` | `!checked` |
+|---|---|---|
+| `true` | `false` | `false` |
+| `false` | `true` | `true` |
+
+Une condition comme `todo !== !todo.checked` ne convient pas : elle compare la tâche entière à `true` ou `false`, au lieu de regarder si elle est terminée. Elle conserve donc toutes les tâches.
+
+### 7. TOGGLE_FILTER — Masquer les tâches sans les supprimer
+
+```jsx
+if (action.type === 'TOGGLE_FILTER') {
+  return {
+    ...state,
+    showCompleted: !state.showCompleted
+  };
+}
+```
+
+Cette action inverse uniquement le choix d'affichage. Le tableau `todos` reste identique.
+
+Le hook calcule ensuite les tâches visibles. La ligne du code peut se lire sous cette forme plus détaillée :
+
+```jsx
+let visibleTodos;
+
+if (state.showCompleted) {
+  visibleTodos = state.todos;
+} else {
+  visibleTodos = state.todos.filter(todo => todo.checked === false);
+}
+```
+
+- Case « Afficher les tâches accomplies » cochée : toutes les tâches sont visibles.
+- Case décochée : les tâches terminées sont cachées, mais toujours présentes dans les données.
+- Une tâche cachée peut réapparaître si l'on réactive le filtre.
+- Une tâche supprimée avec `CLEAR_COMPLETED` n'est plus dans la liste.
+
+`visibleTodos` se calcule à partir de l'état : il n'a besoin ni d'un autre state, ni d'un effet.
+
+### 8. useTodos — Garder le composant simple
+
+Le hook retourne les valeurs utiles à l'affichage et des fonctions pour envoyer les actions :
+
+```jsx
+return {
+  visibleTodos,
+  showCompleted: state.showCompleted,
+  toggleTodo: todo => dispatch({type: 'TOGGLE_TODO', payload: todo}),
+  removeTodo: todo => dispatch({type: 'REMOVE_TODO', payload: todo}),
+  clearCompleted: () => dispatch({type: 'CLEAR_COMPLETED'}),
+  toggleFilter: () => dispatch({type: 'TOGGLE_FILTER'})
+};
+```
+
+Dans `App`, les boutons n'ont plus besoin de connaître les noms des actions :
+
+```jsx
+<button onClick={() => removeTodo(todo)}>Supprimer</button>
+<button onClick={clearCompleted}>Supprimer les tâches terminées</button>
+```
+
+- `() => removeTodo(todo)` fournit une fonction qui transmettra la tâche au clic.
+- `clearCompleted` peut être donné directement, car aucune tâche précise n'est nécessaire.
+- Écrire `onClick={removeTodo(todo)}` appellerait la suppression pendant le rendu.
+
+### 9. Pourquoi les copies avec ...state et ...todo ?
+
+```jsx
+return {
+  ...state,
+  todos: nouvelleListe
+};
+```
+
+Cela signifie : « Construis un nouvel objet qui conserve les autres propriétés de `state`, puis utilise la nouvelle liste pour `todos`. » Ainsi, `showCompleted` est préservé.
+
+De même, `{...todo, checked: !todo.checked}` conserve le nom de la tâche et remplace son état coché.
+
+**Bonne pratique :** le reducer calcule les prochaines données sans modifier les anciennes. Il ne doit pas lancer de requête, installer de timer ni modifier le DOM. Pour une action inconnue, le code retourne `state` sans changement.
+
+### 10. Repères pour relire le chapitre
+
+| Élément | Rôle |
+|---|---|
+| `state` | Les données actuelles |
+| `action` | La demande reçue |
+| `dispatch` | Envoie la demande à React pour son traitement par le reducer |
+| `todoReducer` | Calcule les prochaines données selon la demande |
+| `useTodos` | Regroupe l'état, les actions et le calcul de la liste visible |
+| `App` | Affiche la liste et relie les interactions aux fonctions du hook |
+
+**À retenir :** un clic envoie une action, le reducer retourne les prochaines données et React actualise l'affichage. `useReducer` organise les changements ; `filter`, `map`, `!` et les comparaisons restent des outils JavaScript ordinaires.
+
+## 15. useContext — Rendre le thème accessible aux composants
+
+Cette partie prépare un thème clair ou sombre partagé dans l'application. **Le besoin : plusieurs composants doivent pouvoir connaître le thème et demander à le changer, sans transmettre ces informations à chaque étage avec des props.**
+
+Le code central se trouve dans `15- hook useContext/src/hooks/useTheme.jsx`.
+
+### 1. Comprendre le problème auquel répond le contexte
+
+Avec uniquement des props, une information utilisée par un composant profondément placé peut traverser des composants qui n'en ont pas eux-mêmes besoin :
+
+```text
+App → Page → Formulaire → Champ
+         transmission du thème à chaque étape
+```
+
+Le contexte permet au champ de lire une valeur fournie par un composant situé au-dessus de lui, sans obliger `Page` et `Formulaire` à la transmettre.
+
+**Important :** le contexte ne remplace pas le state. Dans cet exercice, `useState` conserve le thème et le contexte permet de le distribuer.
+
+### 2. createContext — Créer le contexte
+
+```jsx
+export const ThemeContext = createContext({
+  theme: 'light',
+  toggleTheme: () => {}
+});
+```
+
+- `ThemeContext` identifie le contexte que les composants vont fournir ou lire.
+- L'objet passé à `createContext` est une valeur de secours.
+- Sans fournisseur au-dessus du composant, une lecture renvoie ce thème `'light'` et cette fonction vide.
+- La fonction vide ne change rien : la valeur de secours ne crée pas un thème modifiable.
+
+`createContext` est une fonction React, pas un hook. Elle est appelée en dehors des composants pour créer un contexte stable.
+
+### 3. Le fournisseur — Conserver et transmettre le thème
+
+Dans l'exercice, un composant nommé `ThemeContextProvider` possède le state et fournit sa valeur aux enfants :
+
+```jsx
+export function ThemeContextProvider({children}) {
+  const [theme, setTheme] = useState('light');
+
+  const toggleTheme = () => {
+    setTheme(theme === 'light' ? 'dark' : 'light');
+  };
+
+  return <ThemeContext.Provider value={{theme, toggleTheme}}>
+    {children}
+  </ThemeContext.Provider>;
+}
+```
+
+**Fonctionnement :**
+
+- `theme` commence à `'light'`.
+- `toggleTheme` demande de passer au thème opposé.
+- `value` contient les informations accessibles aux composants descendants : le thème et la fonction de changement.
+- `children` représente le contenu placé entre les balises de `ThemeContextProvider`.
+
+La condition de changement peut se lire de façon plus explicite :
+
+```jsx
+if (theme === 'light') {
+  setTheme('dark');
+} else {
+  setTheme('light');
+}
+```
+
+Une autre écriture possible utilise la dernière valeur disponible de l'état :
+
+```jsx
+setTheme(currentTheme => currentTheme === 'light' ? 'dark' : 'light');
+```
+
+### 4. Placer le fournisseur autour de l'application
+
+Dans `main.jsx` :
+
+```jsx
+<StrictMode>
+  <ThemeContextProvider>
+    <App />
+  </ThemeContextProvider>
+</StrictMode>
+```
+
+Tous les composants sous ce fournisseur peuvent lire son contexte. Ils n'ont pas besoin de recevoir une prop `theme` depuis `App`.
+
+**À retenir :** un composant lit la valeur du fournisseur correspondant le plus proche situé au-dessus de lui dans l'arbre React. Un fournisseur ne distribue pas sa valeur à toute la page sans distinction.
+
+### 5. useContext — Lire la valeur du fournisseur
+
+La lecture essentielle est :
+
+```jsx
+const {theme, toggleTheme} = useContext(ThemeContext);
+```
+
+Cela signifie : « Récupère le thème et la fonction de changement fournis au-dessus de ce composant. »
+
+Lorsque le fournisseur donne une nouvelle valeur au contexte, React actualise les composants qui le lisent. `useContext` ne se contente donc pas de lire une valeur une seule fois.
+
+### 6. useTheme — Simplifier cette lecture avec un hook personnalisé
+
+Le chapitre regroupe la lecture et deux calculs simples dans `useTheme` :
+
+```jsx
+export function useTheme() {
+  const {theme, toggleTheme} = useContext(ThemeContext);
+
+  return {
+    isLight: theme === 'light',
+    isDark: theme === 'dark',
+    theme,
+    toggleTheme
+  };
+}
+```
+
+- `theme` : le nom du thème, `'light'` ou `'dark'`.
+- `isLight` : vaut `true` si le thème est clair.
+- `isDark` : vaut `true` si le thème est sombre.
+- `toggleTheme` : fonction permettant de demander le changement.
+
+`isLight` et `isDark` sont calculés à partir du thème : ils n'ont pas besoin de states supplémentaires.
+
+**Différence avec le chapitre sur les hooks personnalisés :** appeler `useTheme()` dans plusieurs composants ne crée pas un nouveau state de thème à chaque appel. Ce hook lit le contexte ; le state se trouve dans le fournisseur commun. En revanche, deux fournisseurs distincts créeraient deux states indépendants.
+
+### 7. Exemple d'utilisation dans un composant
+
+Le fournisseur et le hook sont présents dans le code actuel, mais aucun composant ne consomme encore `useTheme`. Aucun bouton n'appelle donc `toggleTheme`, et l'apparence ne change pas encore selon le contexte.
+
+Voici un exemple pour illustrer l'utilisation prévue, sans modifier les fichiers du chapitre :
+
+```jsx
+import {useTheme} from '../hooks/useTheme.jsx';
+
+function ThemeExample() {
+  const {theme, isDark, toggleTheme} = useTheme();
+
+  return <section className={isDark ? 'bg-dark text-white' : 'bg-light text-dark'}>
+    <p>Thème actuel : {theme}</p>
+    <button onClick={toggleTheme}>Changer le thème</button>
+  </section>;
+}
+```
+
+Le contexte fournit les données, mais **ne crée pas lui-même le style visuel** : le composant doit utiliser le thème pour choisir ses classes ou styles. Dans le code actuel, la barre de navigation conserve ses classes fixes `navbar-light bg-light`.
+
+### 8. Suivre un changement de thème étape par étape
+
+Avec un composant comme celui de l'exemple, placé sous le fournisseur :
+
+1. Le fournisseur initialise son state à `'light'`.
+2. `useTheme()` lit ce thème dans le composant.
+3. Le composant choisit les classes du thème clair.
+4. Un clic appelle `toggleTheme`.
+5. Cette fonction appelle le setter du fournisseur pour passer à `'dark'`.
+6. Le fournisseur fournit la nouvelle valeur du contexte.
+7. Le composant qui lit le contexte se réexécute avec `isDark = true`.
+8. React actualise les classes et le texte affichés.
+
+```text
+Clic dans un composant enfant
+        ↓
+toggleTheme fourni par le contexte
+        ↓
+setTheme dans ThemeContextProvider
+        ↓
+Nouvelle valeur du contexte
+        ↓
+Actualisation des composants qui le lisent
+```
+
+Il n'est pas nécessaire d'ajouter un effet uniquement pour ce changement : le handler modifie le state et les composants calculent leur affichage à partir du thème.
+
+### 9. Bonnes pratiques et limites
+
+- Utiliser des props pour les échanges locaux simples. Le contexte devient utile lorsque des composants éloignés ont besoin de la même information.
+- Appeler `useContext` ou `useTheme` au premier niveau d'un composant ou d'un hook personnalisé, pas dans un clic, une boucle ou une condition.
+- Vérifier que le fournisseur est au-dessus du composant lecteur. Ici, la valeur de secours peut masquer son absence : le thème reste clair et la fonction vide ne fait rien.
+- Le contexte est partagé dans sa partie de l'arbre, mais ne constitue pas une sauvegarde permanente. Sans stockage supplémentaire, un rechargement réinitialise le thème à `'light'`.
+- L'objet `value={{theme, toggleTheme}}` est recréé à chaque rendu du fournisseur. Dans une application plus importante, cela peut provoquer des actualisations de lecteurs même si le thème reste identique. Stabiliser cette valeur peut être une optimisation à envisager si un coût est observé ; ce n'est pas nécessaire pour comprendre le principe.
+- `memo` ne bloque pas une mise à jour provenant d'un contexte lu par le composant.
+
+### 10. Repères pour distinguer les rôles
+
+| Élément | Rôle dans le chapitre |
+|---|---|
+| `useState` | Conserve le thème et permet de le changer |
+| `createContext` | Crée le contexte et sa valeur de secours |
+| `ThemeContext.Provider` | Fournit une valeur à ses descendants |
+| `useContext` | Lit cette valeur et suit ses changements |
+| `useTheme` | Simplifie la lecture et calcule `isLight` et `isDark` |
+
+**À retenir :** le state conserve la donnée, le fournisseur la rend accessible et `useContext` permet aux descendants de la lire. Dans ce chapitre, cette structure prépare un thème partagé ; il reste à l'utiliser dans les composants pour obtenir un changement visuel.
