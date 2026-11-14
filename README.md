@@ -2307,3 +2307,227 @@ Il n'est pas nécessaire d'ajouter un effet uniquement pour ce changement : le h
 | `useTheme` | Simplifie la lecture et calcule `isLight` et `isDark` |
 
 **À retenir :** le state conserve la donnée, le fournisseur la rend accessible et `useContext` permet aux descendants de la lire. Dans ce chapitre, cette structure prépare un thème partagé ; il reste à l'utiliser dans les composants pour obtenir un changement visuel.
+
+## 16. Tester du code — Vérifier un composant et un hook
+
+Cette partie ajoute des tests automatisés au projet. **Le principe : préparer une situation, effectuer une action si nécessaire, puis vérifier le résultat attendu.**
+
+Deux exemples sont testés : l'affichage et la fermeture du composant `Alert`, puis la valeur initiale, l'incrémentation et la limite maximale de `useIncrement`.
+
+### 1. Comprendre le rôle des outils
+
+| Outil | Rôle dans le chapitre |
+|---|---|
+| Vitest | Exécute les tests et indique lesquels réussissent ou échouent |
+| jsdom | Fournit un environnement DOM dans lequel tester les composants, sans ouvrir un vrai navigateur |
+| React Testing Library | Affiche les composants de test et permet de tester les hooks |
+| user-event | Simule des interactions comme un clic |
+
+La configuration se trouve dans `vite.config.js` :
+
+```jsx
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: './test/setup.js'
+  }
+});
+```
+
+- `environment` sélectionne l'environnement des tests.
+- `setupFiles` indique le fichier de préparation à exécuter pour les fichiers de test.
+
+### 2. Nettoyer après chaque test
+
+Dans `test/setup.js` :
+
+```jsx
+import {cleanup} from '@testing-library/react';
+import {afterEach} from 'vitest';
+
+afterEach(() => {
+  cleanup();
+});
+```
+
+`cleanup()` retire les composants montés pour les tests. Cela évite qu'un composant laissé par un test perturbe le suivant et déclenche aussi le nettoyage de ses effets au démontage.
+
+### 3. Lire la structure d'un test
+
+```jsx
+describe('useIncrement()', () => {
+  it('should increment', () => {
+    // Préparer la situation.
+    // Effectuer l'action.
+    // Vérifier le résultat.
+  });
+});
+```
+
+- `describe` regroupe des tests sous un nom.
+- `it` décrit un comportement à vérifier.
+- `expect` exprime le résultat attendu.
+
+Par exemple, `expect(value).toBe(6)` signifie : « Je m'attends à ce que cette valeur soit égale à 6. » Si ce n'est pas le cas, le test échoue.
+
+### 4. Tester l'affichage de Alert
+
+Dans `test/Alert.test.jsx`, le composant est affiché dans l'environnement de test :
+
+```jsx
+const {container} = render(<Alert type="danger">Erreur</Alert>);
+```
+
+- `render` monte le composant avec ses props et son contenu.
+- `container` donne accès au conteneur DOM créé pour ce rendu.
+- `container.firstChild` désigne ici le premier élément affiché : le bloc d'alerte.
+
+Le test compare ensuite ce bloc à un **snapshot**, c'est-à-dire une représentation textuelle attendue du DOM :
+
+```jsx
+expect(container.firstChild).toMatchInlineSnapshot(`
+  <div
+    class="alert alert-danger"
+    role="alert"
+  >
+    Erreur
+    <button>
+      Fermer
+    </button>
+  </div>
+`);
+```
+
+`Inline` signifie que la représentation attendue est enregistrée directement dans le fichier de test. Ici, elle vérifie notamment le texte, la classe d'alerte et la présence du bouton.
+
+**Important :** ce snapshot représente le DOM, pas une capture d'écran. Il ne garantit pas que le style Bootstrap est chargé ni que la mise en page est visuellement correcte.
+
+### 5. Tester le clic sur Fermer
+
+Le deuxième test affiche l'alerte, clique sur son bouton puis vérifie sa disparition :
+
+```jsx
+const {container} = render(<Alert type="danger">Erreur</Alert>);
+
+await userEvent.click(screen.getByText('Fermer'));
+
+expect(container.firstChild).toMatchInlineSnapshot(`null`);
+```
+
+**Fonctionnement étape par étape :**
+
+1. `render` affiche l'alerte.
+2. `screen.getByText('Fermer')` retrouve l'élément contenant ce texte. La recherche échoue si aucun élément ou plusieurs éléments correspondent.
+3. `userEvent.click(...)` simule le clic. `await` attend la fin de l'interaction avant la vérification.
+4. Le bouton appelle `toggle`, fourni par `useToggle(true)`.
+5. L'état `show` passe à `false` et React refait le rendu du composant.
+6. Le composant retourne `null`, donc le bloc d'alerte est retiré.
+7. `container.firstChild` vaut maintenant `null` : le test réussit.
+
+Pour un bouton, une recherche par rôle peut aussi exprimer plus précisément l'intention :
+
+```jsx
+screen.getByRole('button', {name: 'Fermer'});
+```
+
+Dans cet exemple, l'absence du bloc pourrait également se vérifier sans snapshot avec `expect(container.firstChild).toBeNull()`.
+
+### 6. Tester un hook avec renderHook
+
+Un hook React ne s'appelle pas comme une fonction ordinaire en dehors d'un composant. `renderHook` fournit un composant de test qui permet de l'exécuter correctement :
+
+```jsx
+const {result} = renderHook(() => useIncrement({base: 5}));
+
+expect(result.current.count).toBe(5);
+```
+
+- `result.current` donne le dernier résultat retourné par le hook.
+- `count` est la valeur du compteur dans ce résultat.
+- Ce premier test vérifie une valeur initiale **explicitement fournie**, `base: 5`. Malgré son nom `should use the default value`, il ne vérifie pas la valeur par défaut `0`.
+
+Pour tester cette valeur par défaut, un autre cas pourrait utiliser `useIncrement({})` puis attendre `0`. Cet exemple décrit une couverture possible, pas un test ajouté au code.
+
+### 7. act — Attendre les mises à jour React avant de vérifier
+
+Le test d'incrémentation est :
+
+```jsx
+const {result} = renderHook(() => useIncrement({base: 5}));
+
+act(() => result.current.increment());
+
+expect(result.current.count).toBe(6);
+```
+
+1. Le compteur commence à `5`.
+2. `increment()` appelle le setter du hook.
+3. `act` permet à React de traiter les mises à jour liées à cet appel avant la vérification.
+4. Le nouveau résultat du hook contient `count = 6`.
+
+**À retenir :** `act` ne fait pas l'incrémentation à notre place ; il encadre une action qui provoque une mise à jour React. Il ne constitue pas non plus une attente automatique de n'importe quelle requête ou de n'importe quel timer.
+
+Dans le test de clic, les outils de Testing Library prennent en charge cet encadrement pour l'interaction. Ici, on utilise explicitement `act` parce qu'on appelle directement la fonction retournée par le hook.
+
+### 8. Vérifier que le compteur ne dépasse pas max
+
+```jsx
+const {result} = renderHook(() => useIncrement({base: 5, max: 7}));
+
+act(() => result.current.increment());
+act(() => result.current.increment());
+act(() => result.current.increment());
+act(() => result.current.increment());
+act(() => result.current.increment());
+
+expect(result.current.count).toBe(7);
+```
+
+Le résultat attendu suit ce parcours :
+
+```text
+Départ : 5
+1er appel : 6
+2e appel : 7
+Appels suivants : toujours 7
+```
+
+Ce test vérifie une règle utile : les appels supplémentaires ne font pas dépasser la limite.
+
+Dans cette version du hook, `increment` et `decrement` utilisent `useCallback`, avec respectivement `[max]` et `[min]`. Les tests portent sur le résultat du compteur, pas sur l'identité de ces fonctions : ils vérifient son comportement.
+
+### 9. Exécuter les tests
+
+Depuis le dossier `16- tester du code` :
+
+```sh
+npm test
+```
+
+Le script exécute `vitest`. En développement local interactif, il permet normalement de surveiller les modifications et de relancer les tests.
+
+Pour effectuer une seule exécution puis quitter :
+
+```sh
+npm test -- --run
+```
+
+Pour mettre à jour volontairement les snapshots :
+
+```sh
+npm test -- --run --update
+```
+
+**Attention :** un snapshot différent demande d'abord une vérification. Le mettre à jour accepte le nouveau résultat ; cela ne corrige pas un bug. Il faut confirmer que le changement est voulu avant de remplacer l'attendu.
+
+### 10. Ce que ces tests couvrent et ne couvrent pas
+
+Les fichiers du chapitre contiennent cinq tests : deux pour `Alert`, trois pour `useIncrement`.
+
+- Ils couvrent le DOM initial de l'alerte, sa fermeture, une valeur initiale du compteur, l'incrémentation et le maximum.
+- Ils ne vérifient pas encore la décrémentation, la limite minimale ni un changement des options du hook.
+- Ils ne testent pas les requêtes réseau du blog ni le comportement de toute l'application dans un vrai navigateur.
+- Les snapshots sont utiles lorsqu'ils restent courts et lisibles. Pour une règle précise, une vérification ciblée peut être plus facile à comprendre et à maintenir.
+
+**À retenir :** un test prépare une situation, déclenche éventuellement une action et compare le résultat à ce qui est attendu. `render` sert aux composants, `renderHook` aux hooks, `userEvent` aux interactions et `act` à encadrer les mises à jour React déclenchées directement dans les tests.
